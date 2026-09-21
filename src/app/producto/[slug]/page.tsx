@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ProductGallery } from "@/components/product-gallery";
 import { notFound } from "next/navigation";
 import { ArrowLeft, MessageCircle, Truck } from "lucide-react";
 import { ProductPurchase } from "@/components/product-purchase";
@@ -6,8 +7,11 @@ import { CartDrawer } from "@/components/cart-drawer";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { ProductCard } from "@/components/product-card";
-import { getProductBySlug, products } from "@/data/products";
+import { products } from "@/data/products";
+import { getSupabaseProducts } from "@/lib/supabase-products";
 import { formatCurrency } from "@/lib/format";
+
+export const dynamic = "force-dynamic";
 
 export function generateStaticParams() {
   return products.map((product) => ({ slug: product.slug }));
@@ -15,13 +19,14 @@ export function generateStaticParams() {
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const product = getProductBySlug(slug);
+  const catalog = await getSupabaseProducts(products);
+  const product = catalog.find((item) => item.slug === slug);
 
   if (!product) {
     notFound();
   }
 
-  const related = products.filter((item) => item.id !== product.id).slice(0, 3);
+  const related = catalog.filter((item) => item.id !== product.id).slice(0, 3);
 
   return (
     <>
@@ -36,11 +41,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
           </p>
 
           <section className="product-layout">
-            <div>
-              <div className="product-main-image">
-                <img src={product.image} alt={product.name} />
-              </div>
-            </div>
+            <ProductGallery name={product.name} images={product.images?.length ? product.images : [product.image]} />
 
             <div>
               <h1 style={{ fontSize: 38 }}>{product.name}</h1>

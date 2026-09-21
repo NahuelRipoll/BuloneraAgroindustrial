@@ -43,10 +43,10 @@ export function ProductPurchase({ product }: { product: Product }) {
       <small>{variant ? `SKU ${variant.sku}` : product.variants ? "Elegí diámetro y largo para ver precio y stock" : `SKU ${product.sku}`}</small>
       <div className="price">{formatCurrency(variant?.price ?? product.price)}</div>
       <div className="transfer">{formatCurrency(variant?.transferPrice ?? product.transferPrice)} con transferencia</div>
-      {variant ? <p className="stock-ok">Disponible: {variant.stock} cajas</p> : null}
+      {variant ? variant.stock > 0 ? <p className="stock-ok">Disponible: {variant.stock} unidades</p> : <p className="stock-empty">Sin stock por el momento</p> : null}
     </div>
-    <button className="button purchase-button" disabled={Boolean(product.variants && !variant)} onClick={() => addItem(cartProduct(variant))}>
-      <ShoppingCart size={18} /> {product.variants && !variant ? "Elegí una medida" : "Agregar al carrito"}
+    <button className="button purchase-button" disabled={Boolean(product.variants && (!variant || variant.stock <= 0))} onClick={() => addItem(cartProduct(variant))}>
+      <ShoppingCart size={18} /> {product.variants && !variant ? "Elegí una medida" : variant && variant.stock <= 0 ? "Sin stock" : "Agregar al carrito"}
     </button>
   </>;
 }

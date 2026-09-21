@@ -1,33 +1,43 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SlidersHorizontal, X } from "lucide-react";
 import { ProductCard } from "@/components/product-card";
 import type { Product } from "@/data/products";
+import { draftToProduct, readLocalDrafts } from "@/lib/local-products";
+import { hasSupabaseConfig } from "@/lib/supabase";
 
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 export function ShopCatalog({ products }: { products: Product[] }) {
+  const [localProducts, setLocalProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("Todas");
   const [brand, setBrand] = useState("Todas");
   const [stockOnly, setStockOnly] = useState(false);
   const [sort, setSort] = useState("featured");
-  const categories = ["Todas", ...new Set(products.map((product) => product.category))];
-  const brands = ["Todas", ...new Set(products.map((product) => product.brand))];
+  useEffect(() => {
+    const refresh = () => setLocalProducts(hasSupabaseConfig() ? [] : readLocalDrafts().filter((draft) => draft.published).map(draftToProduct));
+    refresh();
+    window.addEventListener("storage", refresh);
+    return () => window.removeEventListener("storage", refresh);
+  }, []);
+  const catalog = useMemo(() => [...products, ...localProducts], [localProducts, products]);
+  const categories = ["Todas", ...new Set(catalog.map((product) => product.category))];
+  const brands = ["Todas", ...new Set(catalog.map((product) => product.brand))];
 
   const filtered = useMemo(() => {
     const term = normalize(query.trim());
-    const result = products.filter((product) => {
+    const result = catalog.filter((product) => {
       const searchable = normalize([product.name, product.sku, product.brand, product.category, ...Object.values(product.specs)].join(" "));
       const hasStock = product.variants ? product.variants.some((variant) => variant.stock > 0) : product.stock > 0;
       return (!term || searchable.includes(term)) && (category === "Todas" || product.category === category)
         && (brand === "Todas" || product.brand === brand) && (!stockOnly || hasStock);
     });
     return [...result].sort((a, b) => sort === "price-asc" ? a.price - b.price : sort === "price-desc" ? b.price - a.price : sort === "name" ? a.name.localeCompare(b.name) : 0);
-  }, [brand, category, products, query, sort, stockOnly]);
+  }, [brand, catalog, category, query, sort, stockOnly]);
 
   const reset = () => { setQuery(""); setCategory("Todas"); setBrand("Todas"); setStockOnly(false); setSort("featured"); };
 

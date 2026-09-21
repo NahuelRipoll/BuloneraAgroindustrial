@@ -11,6 +11,8 @@ export type Product = {
   stock: number;
   badge?: string;
   image: string;
+  images?: string[];
+  localDraftId?: string;
   specs: Record<string, string>;
   variants?: ProductVariant[];
 };

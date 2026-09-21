@@ -8,14 +8,15 @@ export function ProductCard({ product }: { product: Product }) {
   const displayPrice = lowestVariant?.price ?? product.price;
   const displayTransferPrice = lowestVariant?.transferPrice ?? product.transferPrice;
 
+  const href = product.localDraftId ? `/producto/local/${product.localDraftId}` : `/producto/${product.slug}`;
   return (
     <article className="product-card">
-      <Link href={`/producto/${product.slug}`} className="product-image">
+      <Link href={href} className="product-image">
         {product.badge ? <span className="badge">{product.badge}</span> : null}
         <img src={product.image} alt={product.name} />
       </Link>
       <div className="product-body">
-        <Link href={`/producto/${product.slug}`} className="product-title">
+        <Link href={href} className="product-title">
           {product.name}
         </Link>
         <div>
@@ -27,7 +28,7 @@ export function ProductCard({ product }: { product: Product }) {
           <div className="price">{product.variants ? "Desde " : ""}{formatCurrency(displayPrice)}</div>
           <div className="transfer">{formatCurrency(displayTransferPrice)} con transferencia</div>
         </div>
-        {product.variants ? <Link className="button" href={`/producto/${product.slug}`}>Ver medidas</Link> : <AddToCartButton product={product} />}
+        {product.variants ? <Link className="button" href={href}>Ver medidas</Link> : <AddToCartButton product={product} />}
       </div>
     </article>
   );
