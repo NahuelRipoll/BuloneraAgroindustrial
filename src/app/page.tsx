@@ -124,8 +124,8 @@ export default function Home() {
 
         <section id="nosotros" className="section alt">
           <div className="container grid grid-2" style={{ alignItems: "center" }}>
-            <div className="media-card">
-              <img src="https://images.unsplash.com/photo-1581092162384-8987c1d64926?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80" alt="Mostrador industrial" />
+            <div className="media-card storefront-card">
+              <img className="storefront-photo" src="/imagenes/local-bulonera.png" alt="Frente del local de Bulonera Agroindustrial" />
               <div className="stats">
                 <div className="stat"><strong>15+</strong><span>años</span></div>
                 <div className="stat"><strong>8k</strong><span>referencias</span></div>

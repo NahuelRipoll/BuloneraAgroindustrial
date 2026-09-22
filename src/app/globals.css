@@ -461,6 +461,9 @@ p {
   opacity: 0.78;
 }
 
+.media-card.storefront-card { min-height: 620px; }
+.media-card img.storefront-photo { object-position: center top; opacity: .95; }
+
 .stats {
   position: absolute;
   left: 18px;
