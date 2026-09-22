@@ -242,7 +242,24 @@ p {
   justify-content: center;
   gap: 8px;
   font-weight: 900;
+  line-height: 1.2;
+  text-align: center;
 }
+
+.button > svg,
+.button-muted > svg,
+.button-outline > svg { flex: 0 0 auto; }
+
+.card > .button,
+.card > .button-muted,
+.card > .button-outline { display: flex; width: fit-content; max-width: 100%; margin-inline: auto; }
+
+.button-group-centered,
+.footer-socials,
+.footer-payment-tags { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; }
+
+.footer-socials { margin-top: 18px; }
+.footer-payment-tags { gap: 8px; }
 
 .button {
   background: var(--brand);
@@ -411,6 +428,10 @@ p {
   color: var(--brand);
   flex: none;
 }
+
+.card .button svg,
+.card .button-muted svg,
+.card .button-outline svg { color: currentColor; }
 
 .banner {
   position: relative;

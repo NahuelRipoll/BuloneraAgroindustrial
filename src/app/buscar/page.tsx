@@ -5,6 +5,9 @@ import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { ProductCard } from "@/components/product-card";
 import { products } from "@/data/products";
+import { getSupabaseProducts } from "@/lib/supabase-products";
+
+export const dynamic = "force-dynamic";
 
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -13,9 +16,13 @@ function normalize(value: string) {
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const { q = "" } = await searchParams;
   const term = normalize(q.trim());
-  const results = term ? products.filter((product) =>
-    normalize([product.name, product.sku, product.brand, product.category, ...Object.values(product.specs)].join(" ")).includes(term),
-  ) : [];
+  const terms = term.split(/\s+/).filter(Boolean);
+  const catalog = await getSupabaseProducts(products);
+  const results = terms.length ? catalog.filter((product) => {
+    const variants = product.variants?.flatMap((variant) => [variant.sku, ...Object.values(variant.options)]) ?? [];
+    const searchable = normalize([product.name, product.sku, product.brand, product.category, ...Object.values(product.specs), ...variants].join(" "));
+    return terms.every((word) => searchable.includes(word));
+  }) : [];
   return <>
     <Header /><CartDrawer />
     <main className="section search-page"><div className="container">

@@ -30,10 +30,12 @@ export function ShopCatalog({ products }: { products: Product[] }) {
 
   const filtered = useMemo(() => {
     const term = normalize(query.trim());
+    const terms = term.split(/\s+/).filter(Boolean);
     const result = catalog.filter((product) => {
-      const searchable = normalize([product.name, product.sku, product.brand, product.category, ...Object.values(product.specs)].join(" "));
+      const variants = product.variants?.flatMap((variant) => [variant.sku, ...Object.values(variant.options)]) ?? [];
+      const searchable = normalize([product.name, product.sku, product.brand, product.category, ...Object.values(product.specs), ...variants].join(" "));
       const hasStock = product.variants ? product.variants.some((variant) => variant.stock > 0) : product.stock > 0;
-      return (!term || searchable.includes(term)) && (category === "Todas" || product.category === category)
+      return (!terms.length || terms.every((word) => searchable.includes(word))) && (category === "Todas" || product.category === category)
         && (brand === "Todas" || product.brand === brand) && (!stockOnly || hasStock);
     });
     return [...result].sort((a, b) => sort === "price-asc" ? a.price - b.price : sort === "price-desc" ? b.price - a.price : sort === "name" ? a.name.localeCompare(b.name) : 0);

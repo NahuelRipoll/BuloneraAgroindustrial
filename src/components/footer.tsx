@@ -16,7 +16,7 @@ export function Footer() {
           <p>
             <Mail size={16} /> <a href="mailto:bulonera@bagroindustrial.com">bulonera@bagroindustrial.com</a>
           </p>
-          <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
+          <div className="footer-socials">
             <a className="button-outline" href="#" aria-label="Instagram">
               <Camera size={18} />
             </a>
@@ -36,7 +36,7 @@ export function Footer() {
         <div>
           <h3 style={{ marginBottom: 16, color: "var(--brand)" }}>Medios de pago y envío</h3>
           <p>Aceptamos Mercado Pago, tarjetas y transferencia con descuento especial.</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div className="footer-payment-tags">
             {["Visa", "Mastercard", "Mercado Pago", "Transferencia", "Andreani"].map((item) => (
               <span className="button-outline" key={item} style={{ minHeight: 34 }}>
                 {item}

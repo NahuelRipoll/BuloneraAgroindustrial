@@ -25,7 +25,7 @@ export function ContactForm() {
     <p><input className="form-field" name="phone" required autoComplete="tel" type="tel" placeholder="Teléfono" /></p>
     <p><select className="form-select" name="category" required defaultValue="Bulonería"><option>Bulonería</option><option>Herramientas</option><option>Agro y campo</option><option>Compra mayorista / empresa</option></select></p>
     <p><textarea className="form-area" name="message" required rows={5} placeholder="Indicá medidas, cantidades, marca o aplicación." /></p>
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+    <div className="button-group-centered">
       <button className="button" type="submit"><Mail size={18} /> Enviar por mail</button>
       <a className="button-muted" href="https://wa.me/5492634564130"><MessageCircle size={18} /> WhatsApp</a>
     </div>
