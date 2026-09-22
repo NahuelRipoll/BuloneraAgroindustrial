@@ -59,7 +59,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
               <div className="card" style={{ marginTop: 18 }}>
                 <h3><Truck size={18} /> Calcular envío</h3>
                 <p>Ingresá tu código postal al finalizar la compra o consultá por WhatsApp.</p>
-                <a className="button-muted" href="https://wa.me/5492490000000">
+                <a className="button-muted" href="https://wa.me/5492634564130">
                   <MessageCircle size={18} /> Consultar disponibilidad
                 </a>
               </div>

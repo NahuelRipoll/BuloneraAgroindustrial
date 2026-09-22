@@ -15,7 +15,7 @@ export function CartDrawer() {
     `Subtotal: ${formatCurrency(subtotal)}`,
     `Total por transferencia: ${formatCurrency(transferTotal)}`,
   ].join("\n");
-  const checkoutUrl = `https://wa.me/5492490000000?text=${encodeURIComponent(orderText)}`;
+  const checkoutUrl = `https://wa.me/5492634564130?text=${encodeURIComponent(orderText)}`;
 
   return (
     <>

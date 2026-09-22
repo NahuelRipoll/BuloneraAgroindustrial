@@ -5,7 +5,6 @@ import {
   FileSpreadsheet,
   HardHat,
   Landmark,
-  Mail,
   MapPin,
   MessageCircle,
   Nut,
@@ -17,6 +16,7 @@ import {
   Zap,
 } from "lucide-react";
 import { CartDrawer } from "@/components/cart-drawer";
+import { ContactForm } from "@/components/contact-form";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { ProductCard } from "@/components/product-card";
@@ -177,7 +177,7 @@ export default function Home() {
               <ClipboardList size={34} />
               <h2>Cotización para empresas</h2>
               <p>Armá pedidos por caja cerrada, cantidad mayorista o lista de materiales. Respondemos con disponibilidad, precio por volumen y despacho.</p>
-              <a className="button" href="https://wa.me/5492490000000">
+              <a className="button" href="https://wa.me/5492634564130">
                 <MessageCircle size={18} /> Solicitar cotización
               </a>
             </article>
@@ -206,7 +206,7 @@ export default function Home() {
             <div className="grid grid-3">
               <article className="card"><Ruler size={34} /><h3>Medidas y roscas</h3><p>M8 x 40 indica diámetro 8 mm y largo 40 mm. UNC y UNF corresponden a rosca unificada gruesa o fina.</p></article>
               <article className="card"><ShieldCheck size={34} /><h3>Resistencia</h3><p>8.8 para uso general, 10.9 o 12.9 para mayor exigencia, inoxidable para corrosión.</p></article>
-              <article className="card"><FileSpreadsheet size={34} /><h3>Pedido por lista</h3><p>Enviá descripción, cantidad y observaciones. Cotizamos equivalencias si un ítem no está disponible.</p><a className="link" href="mailto:ventas@bulonera.com?subject=Solicitud%20de%20cotizaci%C3%B3n">Enviar lista</a></article>
+              <article className="card"><FileSpreadsheet size={34} /><h3>Pedido por lista</h3><p>Enviá descripción, cantidad y observaciones. Cotizamos equivalencias si un ítem no está disponible.</p><a className="link" href="mailto:bulonera@bagroindustrial.com?subject=Solicitud%20de%20cotizaci%C3%B3n">Enviar lista</a></article>
             </div>
           </div>
         </section>
@@ -218,33 +218,16 @@ export default function Home() {
               <h2>Atención comercial para mostrador, campo y empresas</h2>
               <div className="card">
                 <h3><MapPin size={20} /> Casa central</h3>
-                <p>Ruta Nacional 226 Km 150. Retiro por mostrador, coordinación de transporte y atención a cuentas comerciales.</p>
+                <p>Ruta Provincial 22 (Acceso Este), KM 1023, sobre lateral norte, Rodeo del Medio, Maipú, Mendoza. Retiro por mostrador, coordinación de transporte y atención a cuentas comerciales.</p>
                 <p><Truck size={18} /> Envíos por transporte local, Andreani o Correo Argentino.</p>
               </div>
             </div>
-            <form className="card">
-              <h3>Enviar consulta</h3>
-              <p><input className="form-field" placeholder="Nombre" /></p>
-              <p><input className="form-field" placeholder="Teléfono" /></p>
-              <p>
-                <select className="form-select">
-                  <option>Bulonería</option>
-                  <option>Herramientas</option>
-                  <option>Agro y campo</option>
-                  <option>Compra mayorista / empresa</option>
-                </select>
-              </p>
-              <p><textarea className="form-area" rows={5} placeholder="Indicá medidas, cantidades, marca o aplicación." /></p>
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <a className="button" href="mailto:ventas@bulonera.com?subject=Consulta%20desde%20el%20sitio"><Mail size={18} /> Enviar por mail</a>
-                <a className="button-muted" href="https://wa.me/5492490000000"><MessageCircle size={18} /> WhatsApp</a>
-              </div>
-            </form>
+            <ContactForm />
           </div>
         </section>
       </main>
 
-      <a className="floating-whatsapp" href="https://wa.me/5492490000000" aria-label="Contactar por WhatsApp">
+      <a className="floating-whatsapp" href="https://wa.me/5492634564130" aria-label="Contactar por WhatsApp">
         <MessageCircle />
       </a>
       <Footer />
