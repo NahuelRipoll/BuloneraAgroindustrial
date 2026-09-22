@@ -29,6 +29,7 @@ export type LocalProductVariant = {
   sku: string;
   diameter: string;
   length: string;
+  pitch?: string;
   price: number;
   transferPrice: number;
   stock: number;
@@ -68,6 +69,10 @@ export function draftToProduct(draft: LocalProductDraft): Product {
       ...(draft.diameter ? { "Diámetro": draft.diameter } : {}),
       ...(draft.length ? { Largo: draft.length } : {}),
     },
-    variants: draft.variants?.map((variant) => ({ id: variant.id ?? variant.sku, sku: variant.sku, options: { Diámetro: variant.diameter, Largo: variant.length }, price: variant.price || draft.price, transferPrice: variant.transferPrice || draft.transferPrice, stock: variant.stock })),
+    variants: draft.variants?.map((variant) => ({ id: variant.id ?? variant.sku, sku: variant.sku, options: {
+      ...(variant.diameter ? { Diámetro: variant.diameter } : {}),
+      ...(variant.pitch ? { Paso: variant.pitch } : {}),
+      ...(variant.length ? { Largo: variant.length } : {}),
+    }, price: variant.price || draft.price, transferPrice: variant.transferPrice || draft.transferPrice, stock: variant.stock })),
   };
 }

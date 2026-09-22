@@ -6,21 +6,36 @@ import { useCart } from "@/components/cart-provider";
 import type { Product, ProductVariant } from "@/data/products";
 import { formatCurrency } from "@/lib/format";
 
+function measureValue(value: string, plainAsInches = false) {
+  const clean = value.toUpperCase().replace(/^M/, "").replace(/MM|[`”"]/g, "").trim();
+  const fraction = clean.match(/^(?:(\d+)[ .-])?(\d+)\/(\d+)/);
+  if (fraction) return ((Number(fraction[1] ?? 0) + Number(fraction[2]) / Number(fraction[3])) * 25.4);
+  const numeric = Number(clean.match(/\d+(?:[.,]\d+)?/)?.[0].replace(",", "."));
+  return Number.isFinite(numeric) ? numeric * (plainAsInches && /^\d+(?:[.,]\d+)?$/.test(clean) ? 25.4 : 1) : Number.POSITIVE_INFINITY;
+}
+
+function compareMeasures(left: string, right: string, plainAsInches = false) {
+  const difference = measureValue(left, plainAsInches) - measureValue(right, plainAsInches);
+  return difference || left.localeCompare(right, "es", { numeric: true });
+}
+
 export function ProductPurchase({ product }: { product: Product }) {
   const { addItem } = useCart();
   const [selected, setSelected] = useState<Record<string, string>>({});
-  const optionNames = useMemo(() => product.variants ? [...new Set(product.variants.flatMap((variant) => Object.keys(variant.options)))] : [], [product.variants]);
+  const optionNames = useMemo(() => product.variants ? [...new Set(product.variants.flatMap((variant) => Object.keys(variant.options)))].sort((left, right) => ["Diámetro", "Paso", "Largo"].indexOf(left) - ["Diámetro", "Paso", "Largo"].indexOf(right)) : [], [product.variants]);
   const variant = product.variants?.find((item) => optionNames.every((name) => item.options[name] === selected[name]));
 
-  function valuesFor(name: string) {
-    return [...new Set((product.variants ?? []).map((item) => item.options[name]))];
+  function valuesFor(name: string, optionIndex: number) {
+    const previousNames = optionNames.slice(0, optionIndex);
+    const values = [...new Set((product.variants ?? [])
+      .filter((item) => previousNames.every((previousName) => item.options[previousName] === selected[previousName]))
+      .map((item) => item.options[name]).filter(Boolean))];
+    const includesFractions = values.some((value) => /\d+\/\d+/.test(value));
+    return values.sort((left, right) => compareMeasures(left, right, includesFractions));
   }
 
-  function select(name: string, value: string) {
-    setSelected((current) => {
-      const next = { ...current, [name]: value };
-      return product.variants?.some((item) => Object.entries(next).every(([key, selectedValue]) => item.options[key] === selectedValue)) ? next : { [name]: value };
-    });
+  function select(name: string, value: string, optionIndex: number) {
+    setSelected((current) => Object.fromEntries([...Object.entries(current).filter(([key]) => optionNames.indexOf(key) < optionIndex), [name, value]]));
   }
 
   function cartProduct(selectedVariant?: ProductVariant): Product {
@@ -31,16 +46,16 @@ export function ProductPurchase({ product }: { product: Product }) {
   }
 
   return <>
-    {optionNames.map((name) => <div className="variant-group" key={name}>
-      <strong>{name}: <span>{selected[name] ?? "Seleccioná una opción"}</span></strong>
-      <div className="variant-options">{valuesFor(name).map((value) =>
-        <button type="button" className={selected[name] === value ? "selected" : ""} onClick={() => select(name, value)} key={value}>
+    {optionNames.map((name, optionIndex) => { const enabled = optionNames.slice(0, optionIndex).every((previousName) => selected[previousName]); return <div className="variant-group" key={name}>
+      <strong>{name}: <span>{selected[name] ?? (enabled ? "Seleccioná una opción" : `Seleccioná primero ${optionNames[optionIndex - 1].toLowerCase()}`)}</span></strong>
+      <div className="variant-options">{enabled ? valuesFor(name, optionIndex).map((value) =>
+        <button type="button" className={selected[name] === value ? "selected" : ""} onClick={() => select(name, value, optionIndex)} key={value}>
           {selected[name] === value ? <Check size={14} /> : null}{value}
-        </button>)}</div>
-    </div>)}
-    {product.variants ? <p className="variant-help">Todas las medidas permanecen visibles. Si cambiás a una combinación que no existe en tabla, se limpia la otra selección para que puedas elegir una disponible.</p> : null}
+        </button>) : null}</div>
+    </div>; })}
+    {product.variants ? <p className="variant-help">Las opciones están ordenadas de menor a mayor. Cada selección habilita únicamente las medidas compatibles del paso siguiente.</p> : null}
     <div className="variant-price">
-      <small>{variant ? `SKU ${variant.sku}` : product.variants ? "Elegí diámetro y largo para ver precio y stock" : `SKU ${product.sku}`}</small>
+      <small>{variant ? `SKU ${variant.sku}` : product.variants ? `Elegí ${optionNames.map((name) => name.toLowerCase()).join(" y ")} para ver precio y stock` : `SKU ${product.sku}`}</small>
       <div className="price">{formatCurrency(variant?.price ?? product.price)}</div>
       <div className="transfer">{formatCurrency(variant?.transferPrice ?? product.transferPrice)} con transferencia</div>
       {variant ? variant.stock > 0 ? <p className="stock-ok">Disponible: {variant.stock} unidades</p> : <p className="stock-empty">Sin stock por el momento</p> : null}

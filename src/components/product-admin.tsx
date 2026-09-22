@@ -57,25 +57,54 @@ function decimal(value: string) { return Number(value.replace(/\./g, "").replace
 function transferFromPrice(price: number) { return Math.round(price * .9); }
 function slugify(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
 function stableCode(value: string) { let hash = 5381; for (const char of value) hash = ((hash << 5) + hash) ^ char.charCodeAt(0); return (hash >>> 0).toString(36).toUpperCase(); }
+function normalizeBoltBaseName(value: string) {
+  return value
+    .replace(/\bCALSE\b/gi, "CLASE")
+    .replace(/\s+/g, " ")
+    .replace(/\s+(?:-\s*)+$/, "")
+    .trim();
+}
 function boltMeasure(name: string, category: string) {
-  if (!category.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().includes("BULON")) return null;
-  const cleanName = name.trim().replace(/^\d{6,}\s+/, "");
-  const value = "\\d+(?:[.,]\\d+)?(?:\\s+\\d+\\/\\d+|\\/\\d+)?";
+  const normalizedCategory = category.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  const isNut = /TUERCA/.test(normalizedCategory);
+  const result = (baseName: string, diameter: string, length = "", pitch = "") => ({
+    baseName: normalizeBoltBaseName(isNut ? baseName.replace(/\bM[AB]\b/gi, "") : baseName),
+    diameter,
+    length,
+    pitch,
+  });
+  const isFastenerCategory = /BULON|TORNILLO|TUERCA|ARANDELA|TIRAFONDO|VARILLA\s+ROSCADA/.test(normalizedCategory)
+    || (/ALLEN/.test(normalizedCategory) && !/LLAVE|JUEGO|SET/.test(normalizedCategory));
+  if (!isFastenerCategory) return null;
+  const cleanName = name
+    .trim()
+    .replace(/^(?=\S*\d)\S+\s+/, "")
+    .replace(/\[?\d{1,3}\]\s*/g, "")
+    .replace(/\s*\(\d+(?:-\d+)?\)\s*$/, "")
+    .replace(/[`”"]+/g, "")
+    .trim();
+  const value = "M?(?:\\d+(?:[.,]\\d+)?(?:[ .-]\\d+\\/\\d+)?|\\d+\\/\\d+)";
+  const suffix = "(?:\\s+(.+?))?";
   const classLeading = cleanName.match(new RegExp(`^(.*?CLASE\\s+${value})\\s+[X×]\\s*(${value})\\s*[X×]\\s*(${value})\\s*$`, "i"));
-  if (classLeading) return { baseName: classLeading[1].trim(), diameter: classLeading[2], length: classLeading[3] };
-  const threePart = cleanName.match(new RegExp(`^(.*?)\\s+-?\\s*(${value})\\s*[X×]\\s*(${value})\\s*[X×]\\s*(${value})\\s*$`, "i"));
-  if (threePart) return { baseName: threePart[1].trim(), diameter: `${threePart[2]} × ${threePart[3]}`, length: threePart[4] };
-  const match = cleanName.match(new RegExp(`^(.*?)\\s+-?\\s*(?:[X×]\\s*)?(${value})\\s*[X×]\\s*(${value})\\s*$`, "i"));
-  if (!match) return null;
-  return { baseName: match[1].trim(), diameter: match[2], length: match[3] };
+  if (classLeading) return result(classLeading[1], classLeading[2], classLeading[3]);
+  const threePart = cleanName.match(new RegExp(`^(.*?)\\s+-?\\s*(${value})\\s*[X×]\\s*(${value})\\s*[X×]\\s*(${value})${suffix}$`, "i"));
+  if (threePart) return result([threePart[1], threePart[5]].filter(Boolean).join(" "), isNut ? threePart[2] : `${threePart[2]} × ${threePart[3]}`, isNut ? "" : threePart[4], isNut ? threePart[3] : "");
+  const match = cleanName.match(new RegExp(`^(.*?)\\s+-?\\s*(?:[X×]\\s*)?(${value})\\s*[X×]\\s*(${value})${suffix}$`, "i"));
+  if (match) return result([match[1], match[4]].filter(Boolean).join(" "), match[2], isNut ? "" : match[3], isNut ? match[3] : "");
+  const threadedRod = cleanName.match(new RegExp(`^(.*?VARILLA\\s+ROSCADA.*?)\\s+-?\\s*(${value})(?:\\s+P\\s+(${value}))?\\s*$`, "i"));
+  if (threadedRod) return result(threadedRod[1], threadedRod[2], "", threadedRod[3] ?? "");
+  const single = cleanName.match(new RegExp(`^(.*?)\\s+-?\\s*(${value})(?:\\s*(MM))?${suffix}$`, "i"));
+  if (single) return result([single[1], single[4]].filter(Boolean).join(" "), `${single[2]}${single[3] ? " MM" : ""}`);
+  return null;
 }
 function groupErpVariants(rows: ReturnType<typeof rowToProduct>[]) {
   const output: ReturnType<typeof rowToProduct>[] = [], groups = new Map<string, ReturnType<typeof rowToProduct>>();
   for (const item of rows) {
     const measure = boltMeasure(item.product.name, item.product.category);
     if (!measure) { output.push(item); continue; }
-    const key = `${measure.baseName}|${item.product.brand}|${item.product.category}`.toLowerCase();
-    const variant: LocalProductVariant = { sku: item.product.sku, diameter: measure.diameter, length: measure.length, price: 0, transferPrice: 0, stock: item.product.stock };
+    const groupedCategory = /TUERCA/i.test(item.product.category) ? item.product.category.replace(/\bM[AB]\b/gi, "").replace(/\s+/g, " ").trim() : item.product.category;
+    const key = `${measure.baseName}|${item.product.brand}|${groupedCategory}`.toLowerCase();
+    const variant: LocalProductVariant = { sku: item.product.sku, diameter: measure.diameter, length: measure.length, pitch: measure.pitch, price: 0, transferPrice: 0, stock: item.product.stock };
     const existing = groups.get(key);
     if (existing) {
       existing.product.variants = [...(existing.product.variants ?? []), variant];
@@ -104,6 +133,7 @@ export function ProductAdmin() {
   const [imageUrl, setImageUrl] = useState("");
   const [savingIds, setSavingIds] = useState<string[]>([]);
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(true);
   const [hydrated, setHydrated] = useState(false);
 
@@ -115,7 +145,7 @@ export function ProductAdmin() {
       if (error) { setNotice(`No se pudieron cargar los productos existentes: ${error.message}`); setLoadingCloud(false); return; }
       const cloud: DraftProduct[] = (data ?? []).map((row) => {
         const images = [...(row.product_images ?? [])].sort((a, b) => a.position - b.position).map((image) => image.external_url || (image.storage_path ? supabase.storage.from("product-images").getPublicUrl(image.storage_path).data.publicUrl : "")).filter(Boolean);
-        const variants: LocalProductVariant[] = (row.product_variants ?? []).map((variant: any) => ({ id: variant.id, sku: variant.sku, diameter: variant.options?.["Diámetro"] ?? "", length: variant.options?.Largo ?? "", price: Number(variant.price), transferPrice: Number(variant.transfer_price), stock: variant.stock }));
+        const variants: LocalProductVariant[] = (row.product_variants ?? []).map((variant: any) => ({ id: variant.id, sku: variant.sku, diameter: variant.options?.["Diámetro"] ?? "", length: variant.options?.Largo ?? "", pitch: variant.options?.Paso ?? "", price: Number(variant.price), transferPrice: Number(variant.transfer_price), stock: variant.stock }));
         return { id: row.id, remoteId: row.id, savedPublished: row.published, slug: row.slug, name: row.name, sku: row.sku, brand: row.brand, category: row.category, price: Number(row.price), transferPrice: Number(row.transfer_price), stock: row.stock, image: images[0] ?? "", images, imageStoragePaths: (row.product_images ?? []).map((image: any) => image.storage_path).filter(Boolean), badge: row.badge ?? "", diameter: row.specs?.["Diámetro"] ?? "", length: row.specs?.Largo ?? "", variants: variants.length ? variants : undefined, published: row.published };
       });
       const cloudSkus = new Set(cloud.map((item) => item.sku));
@@ -259,7 +289,7 @@ export function ProductAdmin() {
       if (draft.variants?.length) {
         const { error: clearVariantsError } = await db.from("product_variants").delete().eq("product_id", product.id);
         if (clearVariantsError) throw clearVariantsError;
-        const { error: variantsError } = await db.from("product_variants").insert(draft.variants.map((variant) => ({ product_id: product.id, sku: variant.sku, options: { Diámetro: variant.diameter, Largo: variant.length }, price: variant.price || draft.price, transfer_price: variant.transferPrice || effectiveTransferPrice, stock: variant.stock })));
+        const { error: variantsError } = await db.from("product_variants").insert(draft.variants.map((variant) => ({ product_id: product.id, sku: variant.sku, options: { ...(variant.diameter ? { Diámetro: variant.diameter } : {}), ...(variant.pitch ? { Paso: variant.pitch } : {}), ...(variant.length ? { Largo: variant.length } : {}) }, price: variant.price || draft.price, transfer_price: variant.transferPrice || effectiveTransferPrice, stock: variant.stock })));
         if (variantsError) throw variantsError;
       }
       const { error: clearError } = await db.from("product_images").delete().eq("product_id", product.id);
@@ -284,22 +314,36 @@ export function ProductAdmin() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo guardar el producto en Supabase."); }
     finally { setSavingIds((current) => current.filter((id) => id !== draft.id)); }
   }
-  async function deleteProduct(draft: DraftProduct) {
-    if (!window.confirm(`¿Eliminar “${draft.name}”?${draft.remoteId ? " También se quitará de la tienda y de Supabase." : ""}`)) return;
-    setDeletingIds((current) => [...current, draft.id]);
+  async function removeProduct(draft: DraftProduct) {
+    if (!draft.remoteId) return;
+    const supabase = createSupabaseBrowserClient(); const db: any = supabase;
+    const paths = draft.imageStoragePaths ?? [];
+    if (paths.length) { const { error: storageError } = await supabase.storage.from("product-images").remove(paths); if (storageError) throw storageError; }
+    const { error } = await db.from("products").delete().eq("id", draft.remoteId);
+    if (error) throw error;
+  }
+  async function deleteProducts(items: DraftProduct[]) {
+    if (!items.length) return;
+    const label = items.length === 1 ? `“${items[0].name}”` : `${items.length} artículos`;
+    const hasRemoteProducts = items.some((item) => item.remoteId);
+    if (!window.confirm(`¿Eliminar ${label}?${hasRemoteProducts ? " También se quitarán de la tienda y de Supabase." : ""}`)) return;
+    const ids = items.map((item) => item.id);
+    setDeletingIds((current) => [...new Set([...current, ...ids])]);
+    const removedIds: string[] = [], errors: string[] = [];
     try {
-      if (draft.remoteId) {
-        const supabase = createSupabaseBrowserClient(); const db: any = supabase;
-        const paths = draft.imageStoragePaths ?? [];
-        if (paths.length) { const { error: storageError } = await supabase.storage.from("product-images").remove(paths); if (storageError) throw storageError; }
-        const { error } = await db.from("products").delete().eq("id", draft.remoteId);
-        if (error) throw error;
+      for (const item of items) {
+        try { await removeProduct(item); removedIds.push(item.id); }
+        catch (error) { errors.push(`${item.name}: ${error instanceof Error ? error.message : "error desconocido"}`); }
       }
-      setDrafts((current) => current.filter((item) => item.id !== draft.id));
-      if (editingId === draft.id) setEditingId(null);
-      setNotice(`${draft.name} fue eliminado${draft.remoteId ? " de Supabase" : ""}.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo eliminar el producto."); }
-    finally { setDeletingIds((current) => current.filter((id) => id !== draft.id)); }
+      setDrafts((current) => current.filter((item) => !removedIds.includes(item.id)));
+      setSelectedProductIds((current) => current.filter((id) => !removedIds.includes(id)));
+      if (editingId && removedIds.includes(editingId)) setEditingId(null);
+      setNotice(errors.length ? `${removedIds.length} artículos eliminados. No se pudieron eliminar ${errors.length}: ${errors.join(" · ")}` : `${removedIds.length} artículo${removedIds.length === 1 ? "" : "s"} eliminado${removedIds.length === 1 ? "" : "s"}.`);
+    } finally { setDeletingIds((current) => current.filter((id) => !ids.includes(id))); }
+  }
+  function deleteProduct(draft: DraftProduct) { return deleteProducts([draft]); }
+  function toggleProductSelection(id: string) {
+    setSelectedProductIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   }
 
   return <div className="admin-stack">
@@ -349,15 +393,15 @@ export function ProductAdmin() {
     </section>
 
     {notice ? <p className="admin-notice">{notice}</p> : null}
-    <section className="card admin-card"><div className="admin-heading"><div><span className="eyebrow">Catálogo</span><h2>{drafts.length} artículos cargados</h2></div></div>
+    <section className="card admin-card"><div className="admin-heading"><div><span className="eyebrow">Catálogo</span><h2>{drafts.length} artículos cargados</h2></div>{selectedProductIds.length ? <button className="button-outline bulk-delete" disabled={deletingIds.length > 0} onClick={() => deleteProducts(drafts.filter((item) => selectedProductIds.includes(item.id)))}><Trash2 size={17} /> Eliminar seleccionados ({selectedProductIds.length})</button> : null}</div>
       <p>{loadingCloud ? "Cargando artículos de Supabase…" : "Acá aparecen tanto los productos guardados en Supabase como los recién importados."}</p>
-      {drafts.length ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Foto</th><th>SKU</th><th>Artículo</th><th>Precio</th><th>Stock</th><th>Publicado</th><th></th></tr></thead><tbody>
-        {drafts.map((item) => { const images = [...new Set([...(item.images ?? []), item.image].filter(Boolean))]; const savedPublished = item.savedPublished ?? (item.remoteId ? item.published : false); const changed = item.remoteId ? item.published !== savedPublished : true; return <tr key={item.id}><td><img className="admin-product-thumb" src={images[0] || "/imagenes/producto-sin-foto.svg"} alt="" /></td><td>{item.sku}</td><td>{item.name}</td><td>{item.price > 0 ? `$ ${item.price.toLocaleString("es-AR")}` : "Pendiente"}</td><td>{item.stock}</td><td><span className={changed ? "status-pending" : savedPublished ? "status-published" : ""}>{changed ? (item.published ? "Pendiente de publicar" : "Cambios sin guardar") : savedPublished ? "Sí" : "No"}</span></td><td><div className="table-actions"><button className="icon-button" onClick={() => setEditingId(editingId === item.id ? null : item.id)} aria-label="Editar"><Pencil size={17} /></button><button className="icon-button danger" disabled={deletingIds.includes(item.id)} onClick={() => deleteProduct(item)} aria-label="Eliminar producto"><Trash2 size={17} /></button></div></td></tr>})}
+      {drafts.length ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar todos los artículos" checked={drafts.length > 0 && selectedProductIds.length === drafts.length} onChange={(event) => setSelectedProductIds(event.target.checked ? drafts.map((item) => item.id) : [])} /></th><th>Foto</th><th>SKU</th><th>Artículo</th><th>Precio</th><th>Stock</th><th>Publicado</th><th></th></tr></thead><tbody>
+        {drafts.map((item) => { const images = [...new Set([...(item.images ?? []), item.image].filter(Boolean))]; const savedPublished = item.savedPublished ?? (item.remoteId ? item.published : false); const changed = item.remoteId ? item.published !== savedPublished : true; return <tr key={item.id}><td><input type="checkbox" aria-label={`Seleccionar ${item.name}`} checked={selectedProductIds.includes(item.id)} onChange={() => toggleProductSelection(item.id)} /></td><td><img className="admin-product-thumb" src={images[0] || "/imagenes/producto-sin-foto.svg"} alt="" /></td><td>{item.sku}</td><td>{item.name}</td><td>{item.price > 0 ? `$ ${item.price.toLocaleString("es-AR")}` : "Pendiente"}</td><td>{item.stock}</td><td><span className={changed ? "status-pending" : savedPublished ? "status-published" : ""}>{changed ? (item.published ? "Pendiente de publicar" : "Cambios sin guardar") : savedPublished ? "Sí" : "No"}</span></td><td><div className="table-actions"><button className="icon-button" onClick={() => setEditingId(editingId === item.id ? null : item.id)} aria-label="Editar"><Pencil size={17} /></button><button className="icon-button danger" disabled={deletingIds.includes(item.id)} onClick={() => deleteProduct(item)} aria-label="Eliminar producto"><Trash2 size={17} /></button></div></td></tr>})}
       </tbody></table></div> : <p>Todavía no hay borradores.</p>}
-      {editingId && drafts.find((draft) => draft.id === editingId) ? (() => { const item = drafts.find((draft) => draft.id === editingId)!; const images = [...new Set([...(item.images ?? []), item.image, imageUrl.trim()].filter(Boolean))]; const publishPriceReady = item.variants?.length ? item.variants.every((variant) => variant.price > 0) : item.price > 0; return <div className="product-editor-backdrop" onMouseDown={() => setEditingId(null)}><div className="product-editor" role="dialog" aria-modal="true" aria-label={`Editar ${item.name}`} onMouseDown={(event) => event.stopPropagation()}>
+      {editingId && drafts.find((draft) => draft.id === editingId) ? (() => { const item = drafts.find((draft) => draft.id === editingId)!; const images = [...new Set([...(item.images ?? []), item.image, imageUrl.trim()].filter(Boolean))]; const publishPriceReady = item.variants?.length ? item.variants.every((variant) => variant.price > 0) : item.price > 0; const hasPitch = Boolean(item.variants?.some((variant) => variant.pitch)); return <div className="product-editor-backdrop" onMouseDown={() => setEditingId(null)}><div className="product-editor" role="dialog" aria-modal="true" aria-label={`Editar ${item.name}`} onMouseDown={(event) => event.stopPropagation()}>
         <div className="editor-head"><div><span className="eyebrow">Editar producto</span><h3>{item.name}</h3></div><button className="icon-button" onClick={() => setEditingId(null)} aria-label="Cerrar"><X size={18} /></button></div>
         <div className="product-form compact-form"><label>Precio base {item.variants?.length ? "(opcional)" : ""}<input min="1" type="number" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></label><label>Transferencia base<input min="1" type="number" value={item.transferPrice || ""} onChange={(event) => patchDraft(item.id, { transferPrice: Number(event.target.value) })} /></label><label>Stock total<input min="0" type="number" disabled={Boolean(item.variants?.length)} value={item.stock} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></label><label>Etiqueta<input value={item.badge} onChange={(event) => patchDraft(item.id, { badge: event.target.value })} /></label></div>
-        {item.variants?.length ? <div className="variant-editor"><div><h4>Medidas y stock</h4><p>Si una medida no tiene precio propio, se usa el precio base.</p></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Diámetro</th><th>Largo</th><th>SKU</th><th>Stock</th><th>Precio</th><th>Transferencia</th></tr></thead><tbody>{item.variants.map((variant, index) => <tr key={variant.sku}><td>{variant.diameter}</td><td>{variant.length}</td><td>{variant.sku}</td><td><input type="number" min="0" value={variant.stock} onChange={(event) => updateVariant(item, index, { stock: Number(event.target.value) })} /></td><td><input type="number" min="0" value={variant.price || ""} placeholder={String(item.price || "Base")} onChange={(event) => { const price = Number(event.target.value); updateVariant(item, index, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input type="number" min="0" value={variant.transferPrice || ""} placeholder={String(item.transferPrice || "Base")} onChange={(event) => updateVariant(item, index, { transferPrice: Number(event.target.value) })} /></td></tr>)}</tbody></table></div></div> : null}
+        {item.variants?.length ? <div className="variant-editor"><div><h4>Medidas y stock</h4><p>Si una medida no tiene precio propio, se usa el precio base.</p></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Diámetro</th><th>{hasPitch ? "Paso" : "Largo"}</th><th>SKU</th><th>Stock</th><th>Precio</th><th>Transferencia</th></tr></thead><tbody>{item.variants.map((variant, index) => <tr key={variant.sku}><td>{variant.diameter}</td><td>{hasPitch ? variant.pitch : variant.length}</td><td>{variant.sku}</td><td><input type="number" min="0" value={variant.stock} onChange={(event) => updateVariant(item, index, { stock: Number(event.target.value) })} /></td><td><input type="number" min="0" value={variant.price || ""} placeholder={String(item.price || "Base")} onChange={(event) => { const price = Number(event.target.value); updateVariant(item, index, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input type="number" min="0" value={variant.transferPrice || ""} placeholder={String(item.transferPrice || "Base")} onChange={(event) => updateVariant(item, index, { transferPrice: Number(event.target.value) })} /></td></tr>)}</tbody></table></div></div> : null}
         <div className="photo-manager"><div className="photo-manager-title"><div><h4>Fotos del producto</h4><p>La primera es la portada. Podés guardar hasta 6.</p></div><label className="button-outline photo-upload"><ImagePlus size={17} /> Subir fotos<input type="file" accept="image/*" multiple onChange={(event) => addImageFiles(item, event.target.files)} /></label></div><div className="image-url-row"><input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addImageUrl(item); } }} placeholder="https://... URL de una imagen" /><button className="button-muted" onClick={() => addImageUrl(item)}>Agregar URL</button></div>
           {images.length ? <div className="photo-grid">{images.map((url, index) => <div className="photo-item" key={url}><img src={url} alt={`${item.name} ${index + 1}`} /><span>{index === 0 ? "Portada" : `Foto ${index + 1}`}</span><button onClick={() => removeImage(item, url)} aria-label="Quitar foto"><X size={15} /></button></div>)}</div> : <div className="empty-photos">Todavía no hay fotos. El producto no se podrá publicar hasta agregar una.</div>}
         </div>

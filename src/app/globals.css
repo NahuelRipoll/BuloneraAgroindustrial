@@ -1028,8 +1028,11 @@ p {
 .admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .admin-table th { padding: 11px; text-align: left; color: white; background: #252525; white-space: nowrap; }
 .admin-table td { padding: 11px; border-bottom: 1px solid var(--line); }
+.admin-table input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--brand); cursor: pointer; }
 .admin-table .row-error td { color: #ffb2a8; background: rgba(180, 30, 20, .08); }
 .admin-notice { margin: 0; padding: 13px 16px; color: #b9edc6; border: 1px solid #275c34; background: #122719; border-radius: 5px; }
+.bulk-delete { color: #ff8b7d; border-color: #7b3028; }
+.bulk-delete:hover { background: rgba(180, 30, 20, .12); }
 .icon-button.danger { color: #ff7b6b; }
 .icon-button.cloud { color: #69d69c; }
 .icon-button:disabled { opacity: .4; cursor: wait; }
