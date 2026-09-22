@@ -162,6 +162,7 @@ export default function Home() {
                 ["Lusqtoff", "/imagenes/marcas/lusqtoff.png"],
                 ["Gamma", "/imagenes/marcas/gamma.png"],
                 ["BTA", "/imagenes/marcas/bta.jpg"],
+                ["Dowen Pagio", "/imagenes/marcas/dowen-pagio.png"],
               ].map(([brand, logo]) => (
                 <div className={`brand-cell brand-${brand.toLowerCase()}`} key={brand}>
                   <img src={logo} alt={`Logo ${brand}`} />
