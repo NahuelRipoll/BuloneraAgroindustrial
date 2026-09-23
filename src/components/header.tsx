@@ -8,7 +8,7 @@ import { formatCurrency } from "@/lib/format";
 
 const nav = [
   ["Tienda", "/tienda"], ["Categorías", "/#catalogo"], ["Ofertas", "/#ofertas"], ["Rubros", "/#rubros"],
-  ["Nosotros", "/#nosotros"], ["Marcas", "/#marcas"], ["Asesoramiento", "/#asesoramiento"],
+  ["Nosotros", "/#nosotros"], ["Marcas", "/#marcas"], ["Asesoramiento", "/asesoramiento"],
   ["Contacto", "/#contacto"],
 ];
 
@@ -26,7 +26,7 @@ export function Header() {
             <input name="q" aria-label="Buscar productos" placeholder="¿Qué estás buscando? Ej: bulón 8.8, discos, bocallaves" />
             <button type="submit" aria-label="Buscar"><Search size={20} /></button>
           </form>
-          <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <div className="header-actions">
             <div className="account-link"><User size={24} color="#a3a3a3" /><span>Entrá / Registrate</span></div>
             <button className="cart-button" onClick={openCart}>
               <ShoppingBag size={28} />

@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { Download, FileUp, ImagePlus, PackagePlus, Pencil, Save, Trash2, X } from "lucide-react";
+import { Download, FileUp, ImagePlus, PackagePlus, Pencil, Save, Star, Trash2, X } from "lucide-react";
 import readXlsxFile from "read-excel-file/browser";
 import { productStorageKey, type LocalProductDraft, type LocalProductVariant } from "@/lib/local-products";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
@@ -10,7 +10,7 @@ type DraftProduct = LocalProductDraft & { image: string };
 
 const emptyProduct: Omit<DraftProduct, "id"> = {
   slug: "", name: "", sku: "", brand: "", category: "", price: 0, transferPrice: 0,
-  stock: 0, image: "", badge: "", diameter: "", length: "", published: false,
+  stock: 0, image: "", badge: "", diameter: "", length: "", published: false, featured: false, offerPrice: 0,
 };
 const storageKey = productStorageKey;
 
@@ -35,7 +35,7 @@ function rowToProduct(row: string[], columns: string[], rowNumber: number) {
   if (!Number.isFinite(transferPrice) || transferPrice <= 0) errors.push("Precio de transferencia inválido");
   if (!Number.isInteger(stock) || stock < 0) errors.push("Stock inválido");
   const product: DraftProduct = { id: crypto.randomUUID(), slug: value("slug"), name: value("nombre"), sku: value("sku"), brand: value("marca"), category: value("categoria"),
-    price, transferPrice, stock, diameter: value("diametro"), length: value("largo"), image: value("imagen_url"), badge: value("etiqueta"), published: ["si", "sí", "true", "1"].includes(value("publicado").toLowerCase()) };
+    price, transferPrice, stock, diameter: value("diametro"), length: value("largo"), image: value("imagen_url"), badge: value("etiqueta"), published: ["si", "sí", "true", "1"].includes(value("publicado").toLowerCase()), featured: false };
   return { rowNumber, product, errors, warnings: [] as string[] };
 }
 
@@ -135,18 +135,29 @@ export function ProductAdmin() {
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(true);
+  const [savingOffers, setSavingOffers] = useState(false);
+  const [offerSearch, setOfferSearch] = useState("");
+  const [offerCategory, setOfferCategory] = useState("Todas");
+  const [offerBrand, setOfferBrand] = useState("Todas");
+  const [showFeaturedOnly, setShowFeaturedOnly] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogStatus, setCatalogStatus] = useState("Todos");
+  const [quickPriceSearch, setQuickPriceSearch] = useState("");
+  const [pricePaste, setPricePaste] = useState("");
+  const [bulkPercent, setBulkPercent] = useState(10);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     const local = (() => { try { return JSON.parse(localStorage.getItem(storageKey) ?? "[]") as DraftProduct[]; } catch { return []; } })();
     setDrafts(local); setHydrated(true);
     const supabase = createSupabaseBrowserClient(); const db: any = supabase;
-    db.from("products").select("id,slug,name,sku,brand,category,price,transfer_price,stock,badge,published,specs,product_images(storage_path,external_url,position),product_variants(id,sku,options,price,transfer_price,stock)").order("name").then(({ data, error }: { data: any[] | null; error: { message: string } | null }) => {
+    db.from("products").select("id,slug,name,sku,brand,category,price,transfer_price,stock,badge,published,featured,offer_price,specs,product_images(storage_path,external_url,position),product_variants(id,sku,options,price,transfer_price,stock)").order("name").then(({ data, error }: { data: any[] | null; error: { message: string } | null }) => {
       if (error) { setNotice(`No se pudieron cargar los productos existentes: ${error.message}`); setLoadingCloud(false); return; }
       const cloud: DraftProduct[] = (data ?? []).map((row) => {
         const images = [...(row.product_images ?? [])].sort((a, b) => a.position - b.position).map((image) => image.external_url || (image.storage_path ? supabase.storage.from("product-images").getPublicUrl(image.storage_path).data.publicUrl : "")).filter(Boolean);
         const variants: LocalProductVariant[] = (row.product_variants ?? []).map((variant: any) => ({ id: variant.id, sku: variant.sku, diameter: variant.options?.["Diámetro"] ?? "", length: variant.options?.Largo ?? "", pitch: variant.options?.Paso ?? "", price: Number(variant.price), transferPrice: Number(variant.transfer_price), stock: variant.stock }));
-        return { id: row.id, remoteId: row.id, savedPublished: row.published, slug: row.slug, name: row.name, sku: row.sku, brand: row.brand, category: row.category, price: Number(row.price), transferPrice: Number(row.transfer_price), stock: row.stock, image: images[0] ?? "", images, imageStoragePaths: (row.product_images ?? []).map((image: any) => image.storage_path).filter(Boolean), badge: row.badge ?? "", diameter: row.specs?.["Diámetro"] ?? "", length: row.specs?.Largo ?? "", variants: variants.length ? variants : undefined, published: row.published };
+        return { id: row.id, remoteId: row.id, savedPublished: row.published, savedFeatured: row.featured, slug: row.slug, name: row.name, sku: row.sku, brand: row.brand, category: row.category, price: Number(row.price), transferPrice: Number(row.transfer_price), stock: row.stock, image: images[0] ?? "", images, imageStoragePaths: (row.product_images ?? []).map((image: any) => image.storage_path).filter(Boolean), badge: row.badge ?? "", diameter: row.specs?.["Diámetro"] ?? "", length: row.specs?.Largo ?? "", variants: variants.length ? variants : undefined, published: row.published, featured: row.featured, offerPrice: row.offer_price == null ? 0 : Number(row.offer_price) };
       });
       const cloudSkus = new Set(cloud.map((item) => item.sku));
       setDrafts([...cloud, ...local.filter((item) => !cloudSkus.has(item.sku))]); setLoadingCloud(false);
@@ -171,6 +182,33 @@ export function ProductAdmin() {
   const filteredCategories = useMemo(() => categories.filter((category) => category.toLowerCase().includes(categorySearch.trim().toLowerCase()) && (categoryCounts.get(category) ?? 0) > 0 && (!showSelectedOnly || selectedCategories.includes(category))), [categories, categoryCounts, categorySearch, selectedCategories, showSelectedOnly]);
   const validRows = useMemo(() => preview.filter((item) => item.errors.length === 0 && selectedCategories.includes(item.product.category) && matchesExtraFilters(item)), [brandFilter, minimumStock, preview, selectedCategories]);
   const visiblePreview = useMemo(() => preview.filter((item) => selectedCategories.includes(item.product.category) && matchesExtraFilters(item)), [brandFilter, minimumStock, preview, selectedCategories]);
+  const offerProducts = useMemo(() => drafts.filter((item) => item.published && item.remoteId), [drafts]);
+  const offerCategories = useMemo(() => ["Todas", ...new Set(offerProducts.map((item) => item.category))].sort((a, b) => a === "Todas" ? -1 : b === "Todas" ? 1 : a.localeCompare(b)), [offerProducts]);
+  const offerBrands = useMemo(() => ["Todas", ...new Set(offerProducts.map((item) => item.brand))].sort((a, b) => a === "Todas" ? -1 : b === "Todas" ? 1 : a.localeCompare(b)), [offerProducts]);
+  const filteredOfferProducts = useMemo(() => {
+    const term = offerSearch.trim().toLocaleLowerCase("es");
+    return offerProducts.filter((item) => (!term || `${item.name} ${item.sku}`.toLocaleLowerCase("es").includes(term))
+      && (offerCategory === "Todas" || item.category === offerCategory)
+      && (offerBrand === "Todas" || item.brand === offerBrand)
+      && (!showFeaturedOnly || item.featured));
+  }, [offerBrand, offerCategory, offerProducts, offerSearch, showFeaturedOnly]);
+  const filteredDrafts = useMemo(() => {
+    const term = catalogSearch.trim().toLocaleLowerCase("es");
+    return drafts.filter((item) => {
+      const images = [...(item.images ?? []), item.image].filter(Boolean);
+      const matchesStatus = catalogStatus === "Todos"
+        || (catalogStatus === "Sin precio" && item.price <= 0)
+        || (catalogStatus === "Sin imagen" && images.length === 0)
+        || (catalogStatus === "Sin publicar" && !item.published)
+        || (catalogStatus === "Sin stock" && item.stock <= 0)
+        || (catalogStatus === "Listos" && item.price > 0 && images.length > 0 && item.stock > 0);
+      return matchesStatus && (!term || `${item.name} ${item.sku} ${item.brand} ${item.category}`.toLocaleLowerCase("es").includes(term));
+    });
+  }, [catalogSearch, catalogStatus, drafts]);
+  const quickPriceProducts = useMemo(() => {
+    const term = quickPriceSearch.trim().toLocaleLowerCase("es");
+    return drafts.filter((item) => !item.remoteId && (!term || `${item.name} ${item.sku} ${item.category}`.toLocaleLowerCase("es").includes(term)));
+  }, [drafts, quickPriceSearch]);
 
   useEffect(() => { setSelectedCategories(categories); }, [categories]);
 
@@ -196,7 +234,7 @@ export function ProductAdmin() {
           const name = get(row, "Artículo").trim();
           const product: DraftProduct = { id: crypto.randomUUID(), slug: `${slugify(name).slice(0, 55)}-${slugify(sku)}`, name, sku,
             brand: get(row, "Marca") || "Sin marca", category: get(row, "Rubro") || "Sin categoría", price: 0, transferPrice: 0,
-            stock: Math.max(0, Math.floor(decimal(get(row, "Stock")))), image: "", badge: "", diameter: "", length: "", published: false };
+            stock: Math.max(0, Math.floor(decimal(get(row, "Stock")))), image: "", badge: "", diameter: "", length: "", published: false, featured: false };
           return { rowNumber: headerIndex + index + 2, product, errors: [] as string[], warnings: ["Precio e imagen pendientes"] };
         });
         const grouped = groupErpVariants(parsed).filter((item) => item.product.variants?.length || item.product.stock > 0);
@@ -284,7 +322,7 @@ export function ProductAdmin() {
       // The generated database types will replace this narrow bridge once the remote schema is linked to the CLI.
       const db: any = supabase;
       const effectiveTransferPrice = draft.transferPrice || transferFromPrice(effectivePrice);
-      const { data: product, error } = await db.from("products").upsert({ slug: draft.slug, name: draft.name, sku: draft.sku, brand: draft.brand, category: draft.category, price: effectivePrice, transfer_price: effectiveTransferPrice, stock: draft.stock, badge: draft.badge || null, specs: { ...(draft.diameter ? { "Diámetro": draft.diameter } : {}), ...(draft.length ? { Largo: draft.length } : {}) }, published: draft.published }, { onConflict: "sku" }).select("id").single();
+      const { data: product, error } = await db.from("products").upsert({ slug: draft.slug, name: draft.name, sku: draft.sku, brand: draft.brand, category: draft.category, price: effectivePrice, transfer_price: effectiveTransferPrice, stock: draft.stock, badge: draft.badge || null, specs: { ...(draft.diameter ? { "Diámetro": draft.diameter } : {}), ...(draft.length ? { Largo: draft.length } : {}) }, published: draft.published, featured: draft.featured, offer_price: draft.offerPrice || null }, { onConflict: "sku" }).select("id").single();
       if (error) throw error;
       if (draft.variants?.length) {
         const { error: clearVariantsError } = await db.from("product_variants").delete().eq("product_id", product.id);
@@ -309,7 +347,7 @@ export function ProductAdmin() {
         const { error: imageError } = await db.from("product_images").insert(rows);
         if (imageError) throw imageError;
       }
-      patchDraft(draft.id, { remoteId: product.id, savedPublished: draft.published, price: effectivePrice, transferPrice: effectiveTransferPrice, imageStoragePaths: rows.map((row) => row.storage_path).filter((path): path is string => Boolean(path)) });
+      patchDraft(draft.id, { remoteId: product.id, savedPublished: draft.published, savedFeatured: draft.featured, price: effectivePrice, transferPrice: effectiveTransferPrice, imageStoragePaths: rows.map((row) => row.storage_path).filter((path): path is string => Boolean(path)) });
       setNotice(`${draft.name} quedó guardado en Supabase${draft.published ? " y publicado en la tienda" : " como borrador"}.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo guardar el producto en Supabase."); }
     finally { setSavingIds((current) => current.filter((id) => id !== draft.id)); }
@@ -344,6 +382,84 @@ export function ProductAdmin() {
   function deleteProduct(draft: DraftProduct) { return deleteProducts([draft]); }
   function toggleProductSelection(id: string) {
     setSelectedProductIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  }
+
+  function patchSelected(patch: Partial<DraftProduct>) {
+    setDrafts((current) => current.map((item) => selectedProductIds.includes(item.id) ? { ...item, ...patch } : item));
+  }
+
+  function adjustSelectedPrices() {
+    const factor = 1 + bulkPercent / 100;
+    setDrafts((current) => current.map((item) => selectedProductIds.includes(item.id) ? (() => {
+      const price = Math.round(item.price * factor);
+      return { ...item, price, transferPrice: transferFromPrice(price) };
+    })() : item));
+    setNotice(`Se aplicó ${bulkPercent}% a ${selectedProductIds.length} productos. Revisá los valores y guardá los cambios.`);
+  }
+
+  function applyPastedPrices() {
+    const entries = pricePaste.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+      const parts = line.includes("\t") ? line.split("\t") : line.includes(";") ? line.split(";") : line.split(/\s+/);
+      return [parts[0]?.trim(), decimal(parts.slice(1).join(" ").trim())] as const;
+    }).filter(([sku, price]) => sku && Number.isFinite(price) && price > 0);
+    const prices = new Map(entries);
+    let matches = 0;
+    setDrafts((current) => current.map((item) => {
+      const directPrice = prices.get(item.sku);
+      if (directPrice) { matches += 1; return { ...item, price: directPrice, transferPrice: transferFromPrice(directPrice) }; }
+      if (!item.variants?.length) return item;
+      let changed = false;
+      const variants = item.variants.map((variant) => {
+        const price = prices.get(variant.sku);
+        if (!price) return variant;
+        matches += 1; changed = true;
+        return { ...variant, price, transferPrice: transferFromPrice(price) };
+      });
+      if (!changed) return item;
+      const completedPrices = variants.map((variant) => variant.price).filter((price) => price > 0);
+      return { ...item, variants, price: completedPrices.length ? Math.min(...completedPrices) : item.price, transferPrice: completedPrices.length ? transferFromPrice(Math.min(...completedPrices)) : item.transferPrice };
+    }));
+    setPricePaste("");
+    setNotice(`${matches} precio${matches === 1 ? "" : "s"} aplicado${matches === 1 ? "" : "s"} por SKU.`);
+  }
+
+  async function saveSelectedProducts() {
+    const selected = drafts.filter((item) => selectedProductIds.includes(item.id));
+    if (!selected.length) return;
+    setBulkSaving(true);
+    for (const item of selected) await saveToSupabase(item);
+    setBulkSaving(false);
+    setNotice(`${selected.length} producto${selected.length === 1 ? "" : "s"} procesado${selected.length === 1 ? "" : "s"}.`);
+  }
+
+  function toggleFeatured(id: string) {
+    const selectedCount = drafts.filter((item) => item.featured).length;
+    const item = drafts.find((draft) => draft.id === id);
+    if (!item?.featured && selectedCount >= 4) { setNotice("Podés mostrar hasta 4 productos en Ofertas."); return; }
+    patchDraft(id, { featured: !item?.featured, ...(!item?.featured && !item?.offerPrice ? { offerPrice: transferFromPrice(item?.price ?? 0) } : {}) });
+  }
+
+  async function saveOffers() {
+    const remoteProducts = drafts.filter((item) => item.remoteId);
+    const selected = remoteProducts.filter((item) => item.published && item.featured);
+    const invalid = selected.find((item) => !item.offerPrice || item.offerPrice >= item.price);
+    if (invalid) { setNotice(`Ingresá para ${invalid.name} un precio de oferta menor que el precio base.`); return; }
+    setSavingOffers(true); setNotice("Guardando la selección de ofertas…");
+    try {
+      if (remoteProducts.length) {
+        const db: any = createSupabaseBrowserClient();
+        const remoteIds = remoteProducts.map((item) => item.remoteId!);
+        const { error: clearError } = await db.from("products").update({ featured: false }).in("id", remoteIds);
+        if (clearError) throw clearError;
+        for (const item of selected) {
+          const { error } = await db.from("products").update({ featured: true, offer_price: item.offerPrice }).eq("id", item.remoteId!);
+          if (error) throw error;
+        }
+      }
+      setDrafts((current) => current.map((item) => ({ ...item, featured: item.published ? item.featured : false, savedFeatured: item.published ? item.featured : false })));
+      setNotice(`${selected.length} producto${selected.length === 1 ? "" : "s"} seleccionado${selected.length === 1 ? "" : "s"} para Ofertas.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo guardar la selección de ofertas."); }
+    finally { setSavingOffers(false); }
   }
 
   return <div className="admin-stack">
@@ -392,15 +508,45 @@ export function ProductAdmin() {
         </tbody></table></div><button className="button" disabled={!validRows.length} onClick={importValid}>Importar {validRows.length} filas válidas</button></> : null}
     </section>
 
+    {quickPriceProducts.length ? <section className="card admin-card quick-pricing">
+      <div className="admin-heading"><div><span className="eyebrow">Después de importar</span><h2>Carga rápida de precios</h2></div><strong>{quickPriceProducts.filter((item) => item.price > 0).length} de {quickPriceProducts.length} completos</strong></div>
+      <p>Cargá el precio base directamente en la tabla. El precio por transferencia se calcula automáticamente con 10% de descuento.</p>
+      <div className="price-paste"><div><strong>Pegar precios desde Excel</strong><small>Copiá dos columnas sin encabezado: SKU y precio. También reconoce los SKU de las variantes.</small></div><textarea value={pricePaste} onChange={(event) => setPricePaste(event.target.value)} placeholder={'SKU-001\t12500\nSKU-002\t18900'} /><button className="button-muted" disabled={!pricePaste.trim()} onClick={applyPastedPrices}>Aplicar precios por SKU</button></div>
+      <div className="catalog-filters"><label><span>Buscar</span><input value={quickPriceSearch} onChange={(event) => setQuickPriceSearch(event.target.value)} placeholder="Nombre, SKU o categoría" /></label></div>
+      <div className="admin-table-wrap"><table className="admin-table editable-table"><thead><tr><th>SKU</th><th>Artículo</th><th>Categoría</th><th>Precio base</th><th>Transferencia</th><th>Estado</th></tr></thead><tbody>
+        {quickPriceProducts.map((item) => <tr key={item.id} className={item.price <= 0 ? "row-error" : ""}><td>{item.sku}</td><td>{item.name}</td><td>{item.category}</td><td><input className="price-input" type="number" min="0" value={item.price || ""} placeholder="0" onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input className="price-input" type="number" min="0" value={item.transferPrice || ""} onChange={(event) => patchDraft(item.id, { transferPrice: Number(event.target.value) })} /></td><td>{item.price > 0 ? <span className="status-published">Completo</span> : <span className="status-pending">Falta precio</span>}</td></tr>)}
+      </tbody></table></div>
+    </section> : null}
+
     {notice ? <p className="admin-notice">{notice}</p> : null}
-    <section className="card admin-card"><div className="admin-heading"><div><span className="eyebrow">Catálogo</span><h2>{drafts.length} artículos cargados</h2></div>{selectedProductIds.length ? <button className="button-outline bulk-delete" disabled={deletingIds.length > 0} onClick={() => deleteProducts(drafts.filter((item) => selectedProductIds.includes(item.id)))}><Trash2 size={17} /> Eliminar seleccionados ({selectedProductIds.length})</button> : null}</div>
+    <section className="card admin-card">
+      <div className="admin-heading"><div><span className="eyebrow">Portada</span><h2><Star size={24} /> Ofertas destacadas</h2></div><button className="button" disabled={savingOffers || loadingCloud} onClick={saveOffers}><Save size={17} /> {savingOffers ? "Guardando…" : "Guardar ofertas"}</button></div>
+      <p>Elegí hasta 4 productos publicados y definí su precio promocional. <strong>{offerProducts.filter((item) => item.featured).length} de 4 seleccionados.</strong></p>
+      <div className="offer-filters">
+        <label className="wide-filter"><span>Buscar producto</span><input value={offerSearch} onChange={(event) => setOfferSearch(event.target.value)} placeholder="Nombre o SKU" /></label>
+        <label><span>Categoría</span><select value={offerCategory} onChange={(event) => setOfferCategory(event.target.value)}>{offerCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
+        <label><span>Marca</span><select value={offerBrand} onChange={(event) => setOfferBrand(event.target.value)}>{offerBrands.map((brand) => <option key={brand}>{brand}</option>)}</select></label>
+        <label className="selected-filter"><input type="checkbox" checked={showFeaturedOnly} onChange={(event) => setShowFeaturedOnly(event.target.checked)} /> Solo seleccionados</label>
+        <button className="link-button clear-filter" onClick={() => { setOfferSearch(""); setOfferCategory("Todas"); setOfferBrand("Todas"); setShowFeaturedOnly(false); }}>Limpiar</button>
+      </div>
+      <p className="offer-results-count">{filteredOfferProducts.length} producto{filteredOfferProducts.length === 1 ? "" : "s"} encontrados</p>
+      <div className="offer-selector">
+        {filteredOfferProducts.map((item) => <div className={`offer-option${item.featured ? " selected" : ""}`} key={item.id}><input type="checkbox" aria-label={`Mostrar ${item.name} en Ofertas`} checked={item.featured} onChange={() => toggleFeatured(item.id)} /><img src={item.image || "/imagenes/producto-sin-foto.svg"} alt="" /><span><strong title={item.name}>{item.name}</strong><small>{item.sku} · {item.category} · {item.brand}</small><small>Precio base: $ {item.price.toLocaleString("es-AR")}</small>{item.featured ? <label className="offer-price-field">Precio oferta<input type="number" min="1" max={Math.max(1, item.price - 1)} value={item.offerPrice || ""} onChange={(event) => patchDraft(item.id, { offerPrice: Number(event.target.value) })} /></label> : null}</span></div>)}
+        {!loadingCloud && offerProducts.length > 0 && filteredOfferProducts.length === 0 ? <p className="no-filter-results">No hay productos que coincidan con los filtros.</p> : null}
+        {!loadingCloud && !drafts.some((item) => item.published && item.remoteId) ? <p className="no-filter-results">Publicá al menos un producto para poder destacarlo.</p> : null}
+      </div>
+    </section>
+    <section className="card admin-card"><div className="admin-heading"><div><span className="eyebrow">Catálogo</span><h2>{drafts.length} artículos cargados</h2></div>{selectedProductIds.length ? <button className="button-outline bulk-delete" disabled={deletingIds.length > 0} onClick={() => deleteProducts(drafts.filter((item) => selectedProductIds.includes(item.id)))}><Trash2 size={17} /> Eliminar ({selectedProductIds.length})</button> : null}</div>
       <p>{loadingCloud ? "Cargando artículos de Supabase…" : "Acá aparecen tanto los productos guardados en Supabase como los recién importados."}</p>
-      {drafts.length ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar todos los artículos" checked={drafts.length > 0 && selectedProductIds.length === drafts.length} onChange={(event) => setSelectedProductIds(event.target.checked ? drafts.map((item) => item.id) : [])} /></th><th>Foto</th><th>SKU</th><th>Artículo</th><th>Precio</th><th>Stock</th><th>Publicado</th><th></th></tr></thead><tbody>
-        {drafts.map((item) => { const images = [...new Set([...(item.images ?? []), item.image].filter(Boolean))]; const savedPublished = item.savedPublished ?? (item.remoteId ? item.published : false); const changed = item.remoteId ? item.published !== savedPublished : true; return <tr key={item.id}><td><input type="checkbox" aria-label={`Seleccionar ${item.name}`} checked={selectedProductIds.includes(item.id)} onChange={() => toggleProductSelection(item.id)} /></td><td><img className="admin-product-thumb" src={images[0] || "/imagenes/producto-sin-foto.svg"} alt="" /></td><td>{item.sku}</td><td>{item.name}</td><td>{item.price > 0 ? `$ ${item.price.toLocaleString("es-AR")}` : "Pendiente"}</td><td>{item.stock}</td><td><span className={changed ? "status-pending" : savedPublished ? "status-published" : ""}>{changed ? (item.published ? "Pendiente de publicar" : "Cambios sin guardar") : savedPublished ? "Sí" : "No"}</span></td><td><div className="table-actions"><button className="icon-button" onClick={() => setEditingId(editingId === item.id ? null : item.id)} aria-label="Editar"><Pencil size={17} /></button><button className="icon-button danger" disabled={deletingIds.includes(item.id)} onClick={() => deleteProduct(item)} aria-label="Eliminar producto"><Trash2 size={17} /></button></div></td></tr>})}
+      <div className="catalog-filters"><label><span>Buscar</span><input value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Nombre, SKU, marca o categoría" /></label><label><span>Estado</span><select value={catalogStatus} onChange={(event) => setCatalogStatus(event.target.value)}>{["Todos", "Sin precio", "Sin imagen", "Sin publicar", "Sin stock", "Listos"].map((value) => <option key={value}>{value}</option>)}</select></label><button className="link-button clear-filter" onClick={() => { setCatalogSearch(""); setCatalogStatus("Todos"); }}>Limpiar</button></div>
+      {selectedProductIds.length ? <div className="bulk-toolbar"><strong>{selectedProductIds.length} seleccionados</strong><button className="button-muted" onClick={() => patchSelected({ published: true })}>Publicar</button><button className="button-muted" onClick={() => patchSelected({ published: false, featured: false })}>Despublicar</button><label>Ajustar <input type="number" value={bulkPercent} onChange={(event) => setBulkPercent(Number(event.target.value))} /> %</label><button className="button-muted" onClick={adjustSelectedPrices}>Aplicar</button><button className="button" disabled={bulkSaving} onClick={saveSelectedProducts}><Save size={16} /> {bulkSaving ? "Guardando…" : "Guardar seleccionados"}</button></div> : null}
+      <p className="offer-results-count">{filteredDrafts.length} resultados</p>
+      {drafts.length ? <div className="admin-table-wrap"><table className="admin-table editable-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar resultados" checked={filteredDrafts.length > 0 && filteredDrafts.every((item) => selectedProductIds.includes(item.id))} onChange={(event) => setSelectedProductIds((current) => event.target.checked ? [...new Set([...current, ...filteredDrafts.map((item) => item.id)])] : current.filter((id) => !filteredDrafts.some((item) => item.id === id)))} /></th><th>Foto</th><th>SKU</th><th>Artículo</th><th>Marca</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Publicar</th><th></th></tr></thead><tbody>
+        {filteredDrafts.map((item) => { const images = [...new Set([...(item.images ?? []), item.image].filter(Boolean))]; return <tr key={item.id}><td><input type="checkbox" aria-label={`Seleccionar ${item.name}`} checked={selectedProductIds.includes(item.id)} onChange={() => toggleProductSelection(item.id)} /></td><td><img className="admin-product-thumb" src={images[0] || "/imagenes/producto-sin-foto.svg"} alt="" /></td><td>{item.sku}</td><td className="editable-name"><input className="title-input" value={item.name} aria-label={`Título de ${item.sku}`} onChange={(event) => patchDraft(item.id, { name: event.target.value })} /></td><td><input value={item.brand} onChange={(event) => patchDraft(item.id, { brand: event.target.value })} /></td><td><input value={item.category} onChange={(event) => patchDraft(item.id, { category: event.target.value })} /></td><td><input className="price-input" type="number" min="0" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input className="stock-input" type="number" min="0" value={item.stock} disabled={Boolean(item.variants?.length)} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></td><td><input type="checkbox" checked={item.published} onChange={(event) => patchDraft(item.id, { published: event.target.checked })} /></td><td><div className="table-actions"><button className="icon-button" onClick={() => setEditingId(editingId === item.id ? null : item.id)} aria-label="Editar"><Pencil size={17} /></button><button className="icon-button danger" disabled={deletingIds.includes(item.id)} onClick={() => deleteProduct(item)} aria-label="Eliminar producto"><Trash2 size={17} /></button></div></td></tr>})}
       </tbody></table></div> : <p>Todavía no hay borradores.</p>}
       {editingId && drafts.find((draft) => draft.id === editingId) ? (() => { const item = drafts.find((draft) => draft.id === editingId)!; const images = [...new Set([...(item.images ?? []), item.image, imageUrl.trim()].filter(Boolean))]; const publishPriceReady = item.variants?.length ? item.variants.every((variant) => variant.price > 0) : item.price > 0; const hasPitch = Boolean(item.variants?.some((variant) => variant.pitch)); return <div className="product-editor-backdrop" onMouseDown={() => setEditingId(null)}><div className="product-editor" role="dialog" aria-modal="true" aria-label={`Editar ${item.name}`} onMouseDown={(event) => event.stopPropagation()}>
         <div className="editor-head"><div><span className="eyebrow">Editar producto</span><h3>{item.name}</h3></div><button className="icon-button" onClick={() => setEditingId(null)} aria-label="Cerrar"><X size={18} /></button></div>
-        <div className="product-form compact-form"><label>Precio base {item.variants?.length ? "(opcional)" : ""}<input min="1" type="number" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></label><label>Transferencia base<input min="1" type="number" value={item.transferPrice || ""} onChange={(event) => patchDraft(item.id, { transferPrice: Number(event.target.value) })} /></label><label>Stock total<input min="0" type="number" disabled={Boolean(item.variants?.length)} value={item.stock} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></label><label>Etiqueta<input value={item.badge} onChange={(event) => patchDraft(item.id, { badge: event.target.value })} /></label></div>
+        <div className="product-form compact-form"><label className="wide">Título del artículo<input required value={item.name} onChange={(event) => patchDraft(item.id, { name: event.target.value })} /></label><label>Precio base {item.variants?.length ? "(opcional)" : ""}<input min="1" type="number" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></label><label>Transferencia base<input min="1" type="number" value={item.transferPrice || ""} onChange={(event) => patchDraft(item.id, { transferPrice: Number(event.target.value) })} /></label><label>Stock total<input min="0" type="number" disabled={Boolean(item.variants?.length)} value={item.stock} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></label><label>Etiqueta<input value={item.badge} onChange={(event) => patchDraft(item.id, { badge: event.target.value })} /></label></div>
         {item.variants?.length ? <div className="variant-editor"><div><h4>Medidas y stock</h4><p>Si una medida no tiene precio propio, se usa el precio base.</p></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Diámetro</th><th>{hasPitch ? "Paso" : "Largo"}</th><th>SKU</th><th>Stock</th><th>Precio</th><th>Transferencia</th></tr></thead><tbody>{item.variants.map((variant, index) => <tr key={variant.sku}><td>{variant.diameter}</td><td>{hasPitch ? variant.pitch : variant.length}</td><td>{variant.sku}</td><td><input type="number" min="0" value={variant.stock} onChange={(event) => updateVariant(item, index, { stock: Number(event.target.value) })} /></td><td><input type="number" min="0" value={variant.price || ""} placeholder={String(item.price || "Base")} onChange={(event) => { const price = Number(event.target.value); updateVariant(item, index, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input type="number" min="0" value={variant.transferPrice || ""} placeholder={String(item.transferPrice || "Base")} onChange={(event) => updateVariant(item, index, { transferPrice: Number(event.target.value) })} /></td></tr>)}</tbody></table></div></div> : null}
         <div className="photo-manager"><div className="photo-manager-title"><div><h4>Fotos del producto</h4><p>La primera es la portada. Podés guardar hasta 6.</p></div><label className="button-outline photo-upload"><ImagePlus size={17} /> Subir fotos<input type="file" accept="image/*" multiple onChange={(event) => addImageFiles(item, event.target.files)} /></label></div><div className="image-url-row"><input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addImageUrl(item); } }} placeholder="https://... URL de una imagen" /><button className="button-muted" onClick={() => addImageUrl(item)}>Agregar URL</button></div>
           {images.length ? <div className="photo-grid">{images.map((url, index) => <div className="photo-item" key={url}><img src={url} alt={`${item.name} ${index + 1}`} /><span>{index === 0 ? "Portada" : `Foto ${index + 1}`}</span><button onClick={() => removeImage(item, url)} aria-label="Quitar foto"><X size={15} /></button></div>)}</div> : <div className="empty-photos">Todavía no hay fotos. El producto no se podrá publicar hasta agregar una.</div>}

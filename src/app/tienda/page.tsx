@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { CartDrawer } from "@/components/cart-drawer";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
@@ -9,10 +10,11 @@ import { getSupabaseProducts } from "@/lib/supabase-products";
 export const metadata: Metadata = { title: "Tienda | Bulonera Agroindustrial", description: "Productos de bulonería, herramientas y suministros agroindustriales." };
 export const dynamic = "force-dynamic";
 
-export default async function ShopPage() {
+export default async function ShopPage({ searchParams }: { searchParams: Promise<{ marca?: string }> }) {
+  const { marca } = await searchParams;
   const catalog = await getSupabaseProducts(products);
   return <><Header /><CartDrawer /><main>
     <section className="shop-hero"><div className="container"><span className="eyebrow">Tienda online</span><h1>Catálogo de productos</h1><p>Buscá por producto, código o medida y filtrá por categoría, marca y disponibilidad.</p></div></section>
-    <section className="section"><div className="container"><ShopCatalog products={catalog} /></div></section>
+    <section className="section"><div className="container"><Suspense fallback={<div className="card empty-state">Cargando catálogo…</div>}><ShopCatalog products={catalog} initialBrand={marca ?? "Todas"} /></Suspense></div></section>
   </main><Footer /></>;
 }

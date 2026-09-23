@@ -10,6 +10,8 @@ export type Product = {
   transferPrice: number;
   stock: number;
   badge?: string;
+  featured?: boolean;
+  offerPrice?: number;
   image: string;
   images?: string[];
   localDraftId?: string;
@@ -22,6 +24,7 @@ export type ProductVariant = {
   sku: string;
   options: Record<string, string>;
   price: number;
+  listPrice?: number;
   transferPrice: number;
   stock: number;
 };

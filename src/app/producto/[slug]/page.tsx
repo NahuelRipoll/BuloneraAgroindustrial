@@ -9,7 +9,6 @@ import { Header } from "@/components/header";
 import { ProductCard } from "@/components/product-card";
 import { products } from "@/data/products";
 import { getSupabaseProducts } from "@/lib/supabase-products";
-import { formatCurrency } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -48,11 +47,6 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
               <p style={{ color: "#737373" }}>SKU: {product.sku} | Marca: {product.brand}</p>
 
               <div className="buy-box">
-                {product.listPrice ? (
-                  <div style={{ color: "#737373", textDecoration: "line-through" }}>
-                    Precio de lista: {formatCurrency(product.listPrice)}
-                  </div>
-                ) : null}
                 <ProductPurchase product={product} />
               </div>
 

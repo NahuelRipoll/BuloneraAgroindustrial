@@ -6,6 +6,7 @@ export type LocalProductDraft = {
   id: string;
   remoteId?: string;
   savedPublished?: boolean;
+  savedFeatured?: boolean;
   slug: string;
   name: string;
   sku: string;
@@ -21,6 +22,8 @@ export type LocalProductDraft = {
   diameter: string;
   length: string;
   published: boolean;
+  featured: boolean;
+  offerPrice?: number;
   variants?: LocalProductVariant[];
 };
 

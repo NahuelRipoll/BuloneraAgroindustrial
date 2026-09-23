@@ -20,7 +20,7 @@ export function AdminAuthGate({ children }: { children: ReactNode }) {
 
   async function login(event: FormEvent) {
     event.preventDefault(); setMessage("Enviando enlace…");
-    const { error } = await supabase.auth.signInWithOtp({ email: email.trim().toLowerCase(), options: { emailRedirectTo: `${window.location.origin}/admin/productos` } });
+    const { error } = await supabase.auth.signInWithOtp({ email: email.trim().toLowerCase(), options: { emailRedirectTo: `${window.location.origin}${window.location.pathname}` } });
     setMessage(error ? error.message : "Revisá tu correo: te enviamos un enlace para entrar.");
   }
 

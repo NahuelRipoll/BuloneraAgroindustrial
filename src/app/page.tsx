@@ -2,12 +2,10 @@ import Link from "next/link";
 import {
   CheckCircle2,
   ClipboardList,
-  FileSpreadsheet,
   HardHat,
   Landmark,
   MapPin,
   MessageCircle,
-  Nut,
   Ruler,
   ShieldCheck,
   Tractor,
@@ -21,8 +19,20 @@ import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { ProductCard } from "@/components/product-card";
 import { products } from "@/data/products";
+import { getFeaturedProducts } from "@/lib/supabase-products";
 
-export default function Home() {
+function BoltIcon({ size = 34 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+    <path d="M8 22 18 12h12l10 10v20L30 52H18L8 42V22Z" stroke="currentColor" strokeWidth="5" strokeLinejoin="round" />
+    <path d="M40 27h16v10H40M46 27v10M52 27v10" stroke="currentColor" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="24" cy="32" r="7" stroke="currentColor" strokeWidth="4" />
+  </svg>;
+}
+
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const featuredProducts = await getFeaturedProducts(products);
   return (
     <>
       <Header />
@@ -77,7 +87,7 @@ export default function Home() {
               <Link className="link" href="/tienda">Ver catálogo completo</Link>
             </div>
             <div className="grid grid-4">
-              {products.map((product) => (
+              {featuredProducts.map((product) => (
                 <ProductCard product={product} key={product.id} />
               ))}
             </div>
@@ -94,12 +104,12 @@ export default function Home() {
             </div>
             <div className="grid grid-4">
               {[
-                ["Bulonería", "Hexagonales, allen, arandelas, tuercas y fijaciones especiales.", Nut],
+                ["Bulonería", "Hexagonales, allen, arandelas, tuercas y fijaciones especiales.", BoltIcon],
                 ["Herramientas", "Manuales, eléctricas, medición, abrasivos y accesorios.", Wrench],
                 ["Agro y campo", "Repuestos, sujeción, acoples, cadenas y lubricantes.", Tractor],
                 ["Industria y obra", "Anclajes, químicos, consumibles, EPP y mantenimiento.", HardHat],
               ].map(([title, text, Icon]) => (
-                <article className="card" key={String(title)}>
+                <article className="card catalog-family-card" key={String(title)}>
                   <Icon size={34} />
                   <h3 style={{ marginTop: 16 }}>{String(title)}</h3>
                   <p>{String(text)}</p>
@@ -125,18 +135,17 @@ export default function Home() {
         <section id="nosotros" className="section alt">
           <div className="container grid grid-2" style={{ alignItems: "center" }}>
             <div className="media-card storefront-card">
-              <img className="storefront-photo" src="/imagenes/local-bulonera.png" alt="Frente del local de Bulonera Agroindustrial" />
+              <img className="storefront-photo" src="/imagenes/portada-local.jpeg" alt="Frente del local de Bulonera Agroindustrial" />
               <div className="stats">
-                <div className="stat"><strong>15+</strong><span>años</span></div>
-                <div className="stat"><strong>8k</strong><span>referencias</span></div>
-                <div className="stat"><strong>24h</strong><span>respuesta</span></div>
+                <div className="stat"><strong>3+</strong><span>años</span></div>
+                <div className="stat"><strong>Gran</strong><span>variedad de stock</span></div>
+                <div className="stat schedule-stat"><strong>HORARIO</strong><span>8:00–13:00<br />15:00–19:30</span></div>
               </div>
             </div>
             <div>
               <span className="eyebrow">Quiénes somos</span>
               <h2>Atención de mostrador con criterio técnico</h2>
               <p>Venta minorista, atención mayorista y asesoramiento de aplicación para compras donde importan resistencia, medida, norma, terminación y disponibilidad.</p>
-              <p>La web queda preparada para crecer desde catálogo digital hacia e-commerce transaccional y portal B2B.</p>
               <p><CheckCircle2 size={18} /> Pedido por norma, medida, material o aplicación.</p>
               <p><CheckCircle2 size={18} /> Retiro por mostrador, transporte local o correo.</p>
             </div>
@@ -153,7 +162,6 @@ export default function Home() {
             </div>
             <div className="grid brand-grid">
               {[
-                ["KLD", "/imagenes/marcas/kld.jpg"],
                 ["Bosch", "/imagenes/marcas/bosch.svg"],
                 ["Bahco", "/imagenes/marcas/bahco.svg"],
                 ["Dogo", "/imagenes/marcas/dogo.png"],
@@ -163,10 +171,11 @@ export default function Home() {
                 ["Gamma", "/imagenes/marcas/gamma.png"],
                 ["BTA", "/imagenes/marcas/bta.jpg"],
                 ["Dowen Pagio", "/imagenes/marcas/dowen-pagio.png"],
+                ["Workpro", "/imagenes/marcas/workpro.png"],
               ].map(([brand, logo]) => (
-                <div className={`brand-cell brand-${brand.toLowerCase()}`} key={brand}>
+                <Link href={`/tienda?marca=${encodeURIComponent(brand)}`} className={`brand-cell brand-${brand.toLowerCase()}`} key={brand} aria-label={`Ver productos ${brand}`}>
                   <img src={logo} alt={`Logo ${brand}`} />
-                </div>
+                </Link>
               ))}
             </div>
           </div>
@@ -196,22 +205,6 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="asesoramiento" className="section">
-          <div className="container">
-            <div className="section-head">
-              <div>
-                <span className="eyebrow">Centro de asesoramiento</span>
-                <h2>Guías rápidas para elegir sin fallar en la medida</h2>
-              </div>
-            </div>
-            <div className="grid grid-3">
-              <article className="card"><Ruler size={34} /><h3>Medidas y roscas</h3><p>M8 x 40 indica diámetro 8 mm y largo 40 mm. UNC y UNF corresponden a rosca unificada gruesa o fina.</p></article>
-              <article className="card"><ShieldCheck size={34} /><h3>Resistencia</h3><p>8.8 para uso general, 10.9 o 12.9 para mayor exigencia, inoxidable para corrosión.</p></article>
-              <article className="card"><FileSpreadsheet size={34} /><h3>Pedido por lista</h3><p>Enviá descripción, cantidad y observaciones. Cotizamos equivalencias si un ítem no está disponible.</p><a className="link" href="mailto:bulonera@bagroindustrial.com?subject=Solicitud%20de%20cotizaci%C3%B3n">Enviar lista</a></article>
-            </div>
-          </div>
-        </section>
-
         <section id="contacto" className="section alt">
           <div className="container grid grid-2">
             <div>
@@ -229,7 +222,7 @@ export default function Home() {
       </main>
 
       <a className="floating-whatsapp" href="https://wa.me/5492634564130" aria-label="Contactar por WhatsApp">
-        <MessageCircle />
+        <svg className="whatsapp-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.04 2a9.84 9.84 0 0 0-8.51 14.76L2 22l5.38-1.41A9.99 9.99 0 0 0 12.04 22 10 10 0 0 0 12.04 2Zm0 18.18a8.12 8.12 0 0 1-4.14-1.13l-.3-.18-3.19.84.85-3.1-.2-.32a8.15 8.15 0 1 1 6.98 3.89Zm4.47-6.1c-.24-.12-1.45-.71-1.67-.79-.23-.08-.39-.12-.55.12-.16.25-.63.79-.77.95-.14.17-.28.19-.53.07-.24-.12-1.03-.38-1.96-1.21a7.38 7.38 0 0 1-1.36-1.69c-.14-.24-.02-.37.1-.49.11-.11.25-.28.37-.42.12-.14.16-.25.24-.41.08-.17.04-.31-.02-.43-.06-.12-.55-1.33-.75-1.82-.2-.48-.4-.41-.55-.42h-.47c-.16 0-.43.06-.65.31-.23.24-.86.84-.86 2.05 0 1.21.88 2.38 1 2.54.13.16 1.74 2.65 4.21 3.72.59.25 1.05.41 1.4.52.6.19 1.13.16 1.56.1.47-.07 1.45-.6 1.65-1.17.21-.57.21-1.06.15-1.17-.06-.1-.22-.16-.47-.28Z" /></svg>
       </a>
       <Footer />
     </>
