@@ -120,15 +120,31 @@ export default async function Home() {
         </section>
 
         <section id="rubros" className="section">
-          <div className="container grid grid-2">
-            <Link href="#catalogo" className="banner">
-              <img src="https://images.unsplash.com/photo-1581092580497-e0d23cbdf1dc?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" alt="Herramientas" />
-              <h3>Profesión y oficio</h3>
-            </Link>
-            <Link href="#catalogo" className="banner">
-              <img src="https://images.unsplash.com/photo-1504328345606-18bbc8c9d7d1?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" alt="Agroindustria" />
-              <h3>Agroindustria</h3>
-            </Link>
+          <div className="container">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Lo que trabajamos</span>
+                <h2>Soluciones para taller, obra, campo e industria</h2>
+                <p>Un recorrido por las principales líneas que encontrás en nuestro stock.</p>
+              </div>
+              <Link className="link" href="/tienda">Ver todos los productos</Link>
+            </div>
+            <div className="rubros-grid">
+              {[
+                ["Bulonería y fijaciones", "Bulones métricos y en pulgadas, tornillos, tuercas, arandelas, remaches y abrazaderas.", BoltIcon],
+                ["Llaves y herramientas manuales", "Llaves combinadas y tubo, bocallaves, destornilladores, pinzas y juegos profesionales.", Wrench],
+                ["Mechas y perforación", "Mechas para acero, madera y mampostería, machos, terrajas y accesorios de perforación.", Ruler],
+                ["Corte y abrasivos", "Discos, sierras, hojas, lijas y consumibles para corte, desbaste y terminación.", HardHat],
+                ["Electricidad y taller", "Cables, fichas, cajas, iluminación, soldadura, adhesivos y productos para mantenimiento.", Zap],
+                ["Agro, obra y mantenimiento", "Elementos de sujeción, cadenas, lubricación y soluciones para equipos e instalaciones.", Tractor],
+              ].map(([title, text, Icon]) => (
+                <Link className="rubro-card" href={`/tienda?rubro=${encodeURIComponent(String(title))}`} key={String(title)}>
+                  <span className="rubro-icon"><Icon size={32} /></span>
+                  <span><strong>{String(title)}</strong><small>{String(text)}</small></span>
+                  <span className="rubro-link">Ver productos →</span>
+                </Link>
+              ))}
+            </div>
           </div>
         </section>
 

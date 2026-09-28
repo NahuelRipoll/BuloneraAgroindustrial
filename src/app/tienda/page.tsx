@@ -10,11 +10,11 @@ import { getSupabaseProducts } from "@/lib/supabase-products";
 export const metadata: Metadata = { title: "Tienda | Bulonera Agroindustrial", description: "Productos de bulonería, herramientas y suministros agroindustriales." };
 export const dynamic = "force-dynamic";
 
-export default async function ShopPage({ searchParams }: { searchParams: Promise<{ marca?: string }> }) {
-  const { marca } = await searchParams;
+export default async function ShopPage({ searchParams }: { searchParams: Promise<{ marca?: string; rubro?: string }> }) {
+  const { marca, rubro } = await searchParams;
   const catalog = await getSupabaseProducts(products);
   return <><Header /><CartDrawer /><main>
     <section className="shop-hero"><div className="container"><span className="eyebrow">Tienda online</span><h1>Catálogo de productos</h1><p>Buscá por producto, código o medida y filtrá por categoría, marca y disponibilidad.</p></div></section>
-    <section className="section"><div className="container"><Suspense fallback={<div className="card empty-state">Cargando catálogo…</div>}><ShopCatalog products={catalog} initialBrand={marca ?? "Todas"} /></Suspense></div></section>
+    <section className="section"><div className="container"><Suspense fallback={<div className="card empty-state">Cargando catálogo…</div>}><ShopCatalog products={catalog} initialBrand={marca ?? "Todas"} initialRubro={rubro ?? "Todos"} /></Suspense></div></section>
   </main><Footer /></>;
 }

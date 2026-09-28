@@ -17,14 +17,14 @@ export function Footer() {
             <Mail size={16} /> <a href="mailto:bulonera@bagroindustrial.com">bulonera@bagroindustrial.com</a>
           </p>
         </div>
-        <div>
+        <nav className="footer-navigation" aria-label="Navegación del pie de página">
           <h3 style={{ marginBottom: 16, color: "var(--brand)" }}>Navegación</h3>
-          <p><Link href="/tienda">Tienda y catálogo</Link></p>
-          <p><Link href="/#ofertas">Ofertas destacadas</Link></p>
-          <p><Link href="/#nosotros">Quiénes somos</Link></p>
-          <p><Link href="/asesoramiento">Asesoramiento</Link></p>
-          <p><Link href="/#contacto">Contacto</Link></p>
-        </div>
+          <Link href="/tienda">Tienda y catálogo</Link>
+          <Link href="/#ofertas">Ofertas destacadas</Link>
+          <Link href="/#nosotros">Quiénes somos</Link>
+          <Link href="/asesoramiento">Asesoramiento</Link>
+          <Link href="/#contacto">Contacto</Link>
+        </nav>
         <div className="footer-payment-column">
           <h3 style={{ marginBottom: 16, color: "var(--brand)" }}>Medios de pago y envío</h3>
           <p>Aceptamos Mercado Pago, tarjetas y transferencia con descuento especial.</p>

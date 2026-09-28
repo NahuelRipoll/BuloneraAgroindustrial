@@ -12,16 +12,27 @@ function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
-export function ShopCatalog({ products, initialBrand = "Todas" }: { products: Product[]; initialBrand?: string }) {
+const rubroGroups: Record<string, string[]> = {
+  "Bulonería y fijaciones": ["bulon", "tornillo", "tuerca", "arandela", "remache", "abrazadera", "fijacion"],
+  "Llaves y herramientas manuales": ["llave", "bocallave", "destornillador", "pinza", "alicate", "martillo"],
+  "Mechas y perforación": ["mecha", "broca", "macho", "terraja", "taladro", "perforacion"],
+  "Corte y abrasivos": ["disco", "sierra", "hoja", "lija", "abrasivo", "corte", "desbaste"],
+  "Electricidad y taller": ["cable", "ficha", "electric", "caja", "iluminacion", "soldadura", "adhesivo", "pox"],
+  "Agro, obra y mantenimiento": ["agro", "cadena", "lubric", "obra", "anclaje", "tractor", "mantenimiento"],
+};
+
+export function ShopCatalog({ products, initialBrand = "Todas", initialRubro = "Todos" }: { products: Product[]; initialBrand?: string; initialRubro?: string }) {
   const searchParams = useSearchParams();
   const brandFromUrl = searchParams.get("marca")?.trim() || initialBrand;
   const [localProducts, setLocalProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState("");
+  const [rubro, setRubro] = useState(initialRubro);
   const [category, setCategory] = useState("Todas");
   const [brand, setBrand] = useState(brandFromUrl);
   const [stockOnly, setStockOnly] = useState(false);
   const [sort, setSort] = useState("featured");
   useEffect(() => setBrand(brandFromUrl || "Todas"), [brandFromUrl]);
+  useEffect(() => setRubro(initialRubro || "Todos"), [initialRubro]);
   useEffect(() => {
     const refresh = () => setLocalProducts(hasSupabaseConfig() ? [] : readLocalDrafts().filter((draft) => draft.published).map(draftToProduct));
     refresh();
@@ -29,6 +40,7 @@ export function ShopCatalog({ products, initialBrand = "Todas" }: { products: Pr
     return () => window.removeEventListener("storage", refresh);
   }, []);
   const catalog = useMemo(() => [...products, ...localProducts], [localProducts, products]);
+  const rubros = ["Todos", ...Object.keys(rubroGroups)];
   const categories = ["Todas", ...new Set(catalog.map((product) => product.category))];
   const catalogBrands = [...new Set(catalog.map((product) => product.brand))];
   const matchedCatalogBrand = catalogBrands.find((value) => normalize(value) === normalize(brand));
@@ -42,18 +54,22 @@ export function ShopCatalog({ products, initialBrand = "Todas" }: { products: Pr
       const variants = product.variants?.flatMap((variant) => [variant.sku, ...Object.values(variant.options)]) ?? [];
       const searchable = normalize([product.name, product.sku, product.brand, product.category, ...Object.values(product.specs), ...variants].join(" "));
       const hasStock = product.variants ? product.variants.some((variant) => variant.stock > 0) : product.stock > 0;
-      return (!terms.length || terms.every((word) => searchable.includes(word))) && (category === "Todas" || product.category === category)
+      const groupTerms = rubroGroups[rubro];
+      const matchesRubro = rubro === "Todos" || (groupTerms && groupTerms.some((word) => searchable.includes(normalize(word))));
+      const matchesCategory = category === "Todas" || product.category === category;
+      return (!terms.length || terms.every((word) => searchable.includes(word))) && matchesRubro && matchesCategory
         && (activeBrand === "Todas" || normalize(product.brand) === normalize(activeBrand)) && (!stockOnly || hasStock);
     });
     return [...result].sort((a, b) => sort === "price-asc" ? a.price - b.price : sort === "price-desc" ? b.price - a.price : sort === "name" ? a.name.localeCompare(b.name) : 0);
-  }, [activeBrand, catalog, category, query, sort, stockOnly]);
+  }, [activeBrand, catalog, category, query, rubro, sort, stockOnly]);
 
-  const reset = () => { setQuery(""); setCategory("Todas"); setBrand("Todas"); setStockOnly(false); setSort("featured"); };
+  const reset = () => { setQuery(""); setRubro("Todos"); setCategory("Todas"); setBrand("Todas"); setStockOnly(false); setSort("featured"); };
 
   return <div className="shop-layout">
     <aside className="shop-filters card">
       <div className="filter-title"><h2><SlidersHorizontal size={20} /> Filtros</h2><button className="link-button" onClick={reset}>Limpiar</button></div>
       <label className="filter-field"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Producto, SKU o medida" /></label>
+      <label className="filter-field"><span>Rubro</span><select value={rubro} onChange={(event) => setRubro(event.target.value)}>{rubros.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label className="filter-field"><span>Categoría</span><select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label className="filter-field"><span>Marca</span><select value={activeBrand} onChange={(event) => setBrand(event.target.value)}>{brands.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label className="check-field"><input type="checkbox" checked={stockOnly} onChange={(event) => setStockOnly(event.target.checked)} /> Solo con stock</label>
