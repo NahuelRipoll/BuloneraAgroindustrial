@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { KeyRound, LogIn, LogOut, Mail } from "lucide-react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
@@ -18,11 +18,16 @@ export function AdminAuthGate({ children }: { children: ReactNode }) {
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const sessionUserId = useRef<string | null>(null);
 
   useEffect(() => {
     function handleSession(nextSession: Session | null, event?: AuthChangeEvent) {
+      const nextUserId = nextSession?.user.id ?? null;
+      if (sessionUserId.current !== nextUserId) {
+        sessionUserId.current = nextUserId;
+        setAuthorized(null);
+      }
       setSession(nextSession);
-      setAuthorized(null);
       if (event === "PASSWORD_RECOVERY" || window.location.hash.includes("type=invite") || window.location.hash.includes("type=recovery")) setView("set-password");
       setLoading(false);
     }
@@ -39,7 +44,7 @@ export function AdminAuthGate({ children }: { children: ReactNode }) {
       if (active) setAuthorized(Boolean(data) && !error);
     });
     return () => { active = false; };
-  }, [session, supabase, view]);
+  }, [session?.user.email, session?.user.id, supabase, view]);
 
   async function login(event: FormEvent) {
     event.preventDefault();
