@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import "./globals.css";
 import { CartProvider } from "@/components/cart-provider";
+import { AdminAuthRedirect } from "@/components/admin-auth-redirect";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="es">
       <body className={montserrat.variable}>
+        <AdminAuthRedirect />
         <CartProvider>{children}</CartProvider>
       </body>
     </html>
