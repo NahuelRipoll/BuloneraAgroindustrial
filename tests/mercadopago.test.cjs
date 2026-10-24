@@ -6,15 +6,16 @@ const vm = require('node:vm');
 const { stripTypeScriptTypes } = require('node:module');
 
 // Ejecutar el módulo real con las dos fronteras externas (HTTP y DB) simuladas.
-function load(payment = {}) {
+function load(payment = {}, { buyerId, seller = {} } = {}) {
   const calls = [];
   const db = { rpc: async (...args) => { calls.push(args); return { error: null }; } };
   const context = {
     exports: {}, Buffer, URL, AbortSignal,
     process: { env: { NEXT_PUBLIC_MERCADOPAGO_ENABLED: 'true', MERCADOPAGO_ACCESS_TOKEN: 'test', MERCADOPAGO_WEBHOOK_SECRET: 'secret', NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'key', APP_URL: 'https://preview.example' } },
     require: (name) => name === '@supabase/supabase-js' ? { createClient: () => db } : require(name),
-    fetch: async () => ({ ok: true, json: async () => payment }),
+    fetch: async (url) => ({ ok: true, json: async () => url.endsWith('/users/me') ? seller : payment }),
   };
+  if (buyerId) context.process.env.MERCADOPAGO_TEST_BUYER_ID = buyerId;
   const code = stripTypeScriptTypes(readFileSync('src/lib/mercadopago.ts', 'utf8'))
     .replace(/import \{([^}]+)\} from "([^"]+)";/g, 'const {$1} = require("$2");')
     .replace(/export /g, '') + '\nObject.assign(exports, {paymentConfig, mercadoPago, validSignature, confirmPayment});';
@@ -38,6 +39,27 @@ test('rechaza pagos reales sin escribir en la base', async () => {
   const { api, calls } = load({ live_mode: true, status: 'approved' });
   await assert.rejects(api.confirmPayment('123'), /pago real/);
   assert.equal(calls.length, 0);
+});
+
+test('admite live_mode=true solo con vendedor de prueba y comprador configurado', async () => {
+  const payment = { id: 123, live_mode: true, status: 'approved', external_reference: 'order', transaction_amount: 100, currency_id: 'ARS', collector_id: 456, payer: { id: 789 } };
+  const { api, calls } = load(payment, { buyerId: '789', seller: { id: 456, tags: ['test_user'] } });
+  assert.equal(await api.confirmPayment('123', 'order'), 'approved');
+  assert.equal(calls.length, 1);
+});
+
+test('rechaza vendedor real, vendedor distinto o comprador no autorizado con live_mode=true', async () => {
+  const payment = { id: 123, live_mode: true, status: 'approved', external_reference: 'order', collector_id: 456, payer: { id: 789 } };
+  for (const config of [
+    { buyerId: '789', seller: { id: 456, tags: [] } },
+    { buyerId: '789', seller: { id: 999, tags: ['test_user'] } },
+    { buyerId: '999', seller: { id: 456, tags: ['test_user'] } },
+    { seller: { id: 456, tags: ['test_user'] } },
+  ]) {
+    const { api, calls } = load(payment, config);
+    await assert.rejects(api.confirmPayment('123'), /pago real/);
+    assert.equal(calls.length, 0);
+  }
 });
 
 test('rechaza un pago correspondiente a otro pedido', async () => {

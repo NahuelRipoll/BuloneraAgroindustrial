@@ -31,14 +31,20 @@ export function validSignature(id: string, requestId: string, signature: string,
   return timingSafeEqual(expected, Buffer.from(parts.v1, "hex"));
 }
 
-export type Payment = { id: number; status: string; external_reference: string; transaction_amount: number; currency_id: string; live_mode: boolean; collector_id: number };
+export type Payment = { id: number; status: string; external_reference: string; transaction_amount: number; currency_id: string; live_mode: boolean; collector_id: number; payer?: { id?: number | string } };
 
 export async function confirmPayment(paymentId: string, expectedOrderId?: string) {
   const { token, db } = paymentConfig();
   const payment = await mercadoPago<Payment>(token, `/v1/payments/${encodeURIComponent(paymentId)}`);
   if (expectedOrderId && payment.external_reference !== expectedOrderId) throw new Error("El pago no corresponde al pedido");
-  // Esta rama nunca registra cobros reales, aunque se configure una credencial incorrecta.
-  if (payment.live_mode !== false) throw new Error("Se rechazó un pago real en el entorno de pruebas");
+  // Checkout Pro puede devolver live_mode=true con cuentas de prueba.
+  // Admitirlo únicamente con vendedor test_user y el comprador de prueba configurado.
+  if (payment.live_mode !== false) {
+    const buyerId = process.env.MERCADOPAGO_TEST_BUYER_ID;
+    if (!buyerId || !/^\d+$/.test(buyerId) || String(payment.payer?.id) !== buyerId) throw new Error("Se rechazó un pago real o no verificable en el entorno de pruebas");
+    const seller = await mercadoPago<{ id: number; tags?: string[] }>(token, "/users/me");
+    if (!seller.tags?.includes("test_user") || String(seller.id) !== String(payment.collector_id)) throw new Error("Se rechazó un pago real o de otro vendedor en el entorno de pruebas");
+  }
   if (payment.status !== "approved") return payment.status;
   const { error } = await db.rpc("confirm_test_mercadopago_payment", {
     p_order_id: payment.external_reference,

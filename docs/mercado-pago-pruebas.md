@@ -16,6 +16,7 @@ SUPABASE_SERVICE_ROLE_KEY=CLAVE_PRIVADA_DEL_PROYECTO
 NEXT_PUBLIC_MERCADOPAGO_ENABLED=true
 MERCADOPAGO_ACCESS_TOKEN=TOKEN_DEL_VENDEDOR_DE_PRUEBA
 MERCADOPAGO_WEBHOOK_SECRET=SECRETO_DE_LA_APLICACION
+MERCADOPAGO_TEST_BUYER_ID=USER_ID_DEL_COMPRADOR_DE_PRUEBA
 APP_URL=https://URL-DEL-PREVIEW
 ```
 
@@ -35,7 +36,7 @@ APP_URL=https://URL-DEL-PREVIEW
 
 ## Alcance y pendientes antes de producción
 
-Esta entrega es exclusivamente para pruebas: rechaza pagos con `live_mode=true`. No se habilita producción cambiando una variable.
+Esta entrega es exclusivamente para pruebas. En este flujo se observó que Checkout Pro devuelve `live_mode=true` también para las cuentas de prueba. Para aceptar ese caso se exige verificar el vendedor como `test_user`, su coincidencia con el receptor del pago y que el comprador coincida con `MERCADOPAGO_TEST_BUYER_ID`, copiado desde Cuentas de prueba. No configurar un comprador real en esa variable. No se habilita producción cambiando una variable.
 
 No reserva ni descuenta stock; comprueba disponibilidad al iniciar el pago. Antes de admitir cobros reales hay que implementar reservas y conciliación, resolver pagos duplicados de una preferencia, reintegros y contracargos, datos del comprador, condiciones de entrega y costos de envío, límites de solicitudes y recuperación automática de pagos sin retorno/webhook. Las compras de prueba no se escriben en `orders` ni `order_items` y no aparecen en las analíticas de ventas reales.
 
