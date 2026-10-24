@@ -8,6 +8,7 @@ out/
 
 # Environment variables and secrets
 .env
+env.local
 .env.*
 !.env.example
 
