@@ -27,7 +27,7 @@ export function Header() {
             <button type="submit" aria-label="Buscar"><Search size={20} /></button>
           </form>
           <div className="header-actions">
-            <div className="account-link"><User size={24} color="#a3a3a3" /><span>Entrá / Registrate</span></div>
+            <Link href="/admin" className="account-link" aria-label="Iniciar sesión como administrador"><User size={24} color="#a3a3a3" /><span>Acceso admin</span></Link>
             <button className="cart-button" onClick={openCart}>
               <ShoppingBag size={28} />
               <span>Carrito <span className="cart-count">({itemCount})</span><br /><small>{formatCurrency(subtotal)}</small></span>

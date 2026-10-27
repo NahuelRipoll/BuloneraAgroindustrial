@@ -1,127 +1,29 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { Download, FileUp, ImagePlus, PackagePlus, Pencil, Save, Star, Trash2, X } from "lucide-react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Check, ClipboardList, Download, FileUp, ImagePlus, Layers, Pencil, Percent, Save, Star, Trash2, X } from "lucide-react";
 import readXlsxFile from "read-excel-file/browser";
 import { productStorageKey, type LocalProductDraft, type LocalProductVariant } from "@/lib/local-products";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { productModules } from "@/lib/admin-product-modules";
+import { ProductQuickEntry } from "@/components/product-quick-entry";
+import { ProductPriceManager } from "@/components/product-price-manager";
+import { loadAdminCatalog, mergeAdminDrafts } from "@/lib/admin-catalog";
+import { applyPriceChanges, buildPricePreview, percentageInputs } from "@/lib/admin-price-preview";
+
+import { optimizeImage, rowToProduct, parseDelimited, decimal, transferFromPrice, slugify, parsePriceValue, readPriceRecordsFromFile, parsePricePasteText, buildPriceLookup, findPriceInLookup, downloadProductMeasureTemplate, groupErpVariants, groupTemplateVariants } from "@/lib/admin-product-tools";
 
 type DraftProduct = LocalProductDraft & { image: string };
 
-const emptyProduct: Omit<DraftProduct, "id"> = {
-  slug: "", name: "", sku: "", brand: "", category: "", price: 0, transferPrice: 0,
-  stock: 0, image: "", badge: "", diameter: "", length: "", published: false, featured: false, offerPrice: 0,
-};
 const storageKey = productStorageKey;
 
-async function optimizeImage(file: File) {
-  if (!file.type.startsWith("image/")) throw new Error(`${file.name} no es una imagen.`);
-  if (file.size > 12 * 1024 * 1024) throw new Error(`${file.name} supera el máximo de 12 MB.`);
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 900 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  return canvas.toDataURL("image/jpeg", .72);
-}
-
-function rowToProduct(row: string[], columns: string[], rowNumber: number) {
-  const value = (name: string) => row[columns.indexOf(name)] ?? "";
-  const errors: string[] = [];
-  ["slug", "nombre", "sku", "marca", "categoria"].forEach((name) => { if (!value(name)) errors.push(`Falta ${name}`); });
-  const price = Number(value("precio")), transferPrice = Number(value("precio_transferencia")), stock = Number(value("stock"));
-  if (!Number.isFinite(price) || price <= 0) errors.push("Precio inválido");
-  if (!Number.isFinite(transferPrice) || transferPrice <= 0) errors.push("Precio de transferencia inválido");
-  if (!Number.isInteger(stock) || stock < 0) errors.push("Stock inválido");
-  const product: DraftProduct = { id: crypto.randomUUID(), slug: value("slug"), name: value("nombre"), sku: value("sku"), brand: value("marca"), category: value("categoria"),
-    price, transferPrice, stock, diameter: value("diametro"), length: value("largo"), image: value("imagen_url"), badge: value("etiqueta"), published: ["si", "sí", "true", "1"].includes(value("publicado").toLowerCase()), featured: false };
-  return { rowNumber, product, errors, warnings: [] as string[] };
-}
-
-function parseDelimited(text: string, delimiter: string) {
-  const rows: string[][] = []; let row: string[] = [], field = "", quoted = false;
-  const clean = (value: string) => value.trim().replace(/^=/, "").replace(/^\uFEFF/, "");
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index], next = text[index + 1];
-    if (char === '"' && quoted && next === '"') { field += '"'; index += 1; }
-    else if (char === '"') quoted = !quoted;
-    else if (char === delimiter && !quoted) { row.push(clean(field)); field = ""; }
-    else if ((char === "\n" || char === "\r") && !quoted) { if (char === "\r" && next === "\n") index += 1; row.push(clean(field)); if (row.some(Boolean)) rows.push(row); row = []; field = ""; }
-    else field += char;
-  }
-  row.push(clean(field)); if (row.some(Boolean)) rows.push(row); return rows;
-}
-
-function decimal(value: string) { return Number(value.replace(/\./g, "").replace(",", ".")); }
-function transferFromPrice(price: number) { return Math.round(price * .9); }
-function slugify(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
-function stableCode(value: string) { let hash = 5381; for (const char of value) hash = ((hash << 5) + hash) ^ char.charCodeAt(0); return (hash >>> 0).toString(36).toUpperCase(); }
-function normalizeBoltBaseName(value: string) {
-  return value
-    .replace(/\bCALSE\b/gi, "CLASE")
-    .replace(/\s+/g, " ")
-    .replace(/\s+(?:-\s*)+$/, "")
-    .trim();
-}
-function boltMeasure(name: string, category: string) {
-  const normalizedCategory = category.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-  const isNut = /TUERCA/.test(normalizedCategory);
-  const result = (baseName: string, diameter: string, length = "", pitch = "") => ({
-    baseName: normalizeBoltBaseName(isNut ? baseName.replace(/\bM[AB]\b/gi, "") : baseName),
-    diameter,
-    length,
-    pitch,
-  });
-  const isFastenerCategory = /BULON|TORNILLO|TUERCA|ARANDELA|TIRAFONDO|VARILLA\s+ROSCADA/.test(normalizedCategory)
-    || (/ALLEN/.test(normalizedCategory) && !/LLAVE|JUEGO|SET/.test(normalizedCategory));
-  if (!isFastenerCategory) return null;
-  const cleanName = name
-    .trim()
-    .replace(/^(?=\S*\d)\S+\s+/, "")
-    .replace(/\[?\d{1,3}\]\s*/g, "")
-    .replace(/\s*\(\d+(?:-\d+)?\)\s*$/, "")
-    .replace(/[`”"]+/g, "")
-    .trim();
-  const value = "M?(?:\\d+(?:[.,]\\d+)?(?:[ .-]\\d+\\/\\d+)?|\\d+\\/\\d+)";
-  const suffix = "(?:\\s+(.+?))?";
-  const classLeading = cleanName.match(new RegExp(`^(.*?CLASE\\s+${value})\\s+[X×]\\s*(${value})\\s*[X×]\\s*(${value})\\s*$`, "i"));
-  if (classLeading) return result(classLeading[1], classLeading[2], classLeading[3]);
-  const threePart = cleanName.match(new RegExp(`^(.*?)\\s+-?\\s*(${value})\\s*[X×]\\s*(${value})\\s*[X×]\\s*(${value})${suffix}$`, "i"));
-  if (threePart) return result([threePart[1], threePart[5]].filter(Boolean).join(" "), isNut ? threePart[2] : `${threePart[2]} × ${threePart[3]}`, isNut ? "" : threePart[4], isNut ? threePart[3] : "");
-  const match = cleanName.match(new RegExp(`^(.*?)\\s+-?\\s*(?:[X×]\\s*)?(${value})\\s*[X×]\\s*(${value})${suffix}$`, "i"));
-  if (match) return result([match[1], match[4]].filter(Boolean).join(" "), match[2], isNut ? "" : match[3], isNut ? match[3] : "");
-  const threadedRod = cleanName.match(new RegExp(`^(.*?VARILLA\\s+ROSCADA.*?)\\s+-?\\s*(${value})(?:\\s+P\\s+(${value}))?\\s*$`, "i"));
-  if (threadedRod) return result(threadedRod[1], threadedRod[2], "", threadedRod[3] ?? "");
-  const single = cleanName.match(new RegExp(`^(.*?)\\s+-?\\s*(${value})(?:\\s*(MM))?${suffix}$`, "i"));
-  if (single) return result([single[1], single[4]].filter(Boolean).join(" "), `${single[2]}${single[3] ? " MM" : ""}`);
-  return null;
-}
-function groupErpVariants(rows: ReturnType<typeof rowToProduct>[]) {
-  const output: ReturnType<typeof rowToProduct>[] = [], groups = new Map<string, ReturnType<typeof rowToProduct>>();
-  for (const item of rows) {
-    const measure = boltMeasure(item.product.name, item.product.category);
-    if (!measure) { output.push(item); continue; }
-    const groupedCategory = /TUERCA/i.test(item.product.category) ? item.product.category.replace(/\bM[AB]\b/gi, "").replace(/\s+/g, " ").trim() : item.product.category;
-    const key = `${measure.baseName}|${item.product.brand}|${groupedCategory}`.toLowerCase();
-    const variant: LocalProductVariant = { sku: item.product.sku, diameter: measure.diameter, length: measure.length, pitch: measure.pitch, price: 0, transferPrice: 0, stock: item.product.stock };
-    const existing = groups.get(key);
-    if (existing) {
-      existing.product.variants = [...(existing.product.variants ?? []), variant];
-      existing.product.stock += item.product.stock;
-      existing.warnings = [`${existing.product.variants.length} medidas agrupadas · precios e imagen pendientes`];
-    } else {
-      const code = stableCode(key);
-      const grouped = { ...item, product: { ...item.product, id: crypto.randomUUID(), name: measure.baseName, slug: `${slugify(measure.baseName).slice(0, 55)}-${code.toLowerCase()}`, sku: `GRP-${code}`, diameter: "", length: "", variants: [variant] }, warnings: ["1 medida agrupada · precios e imagen pendientes"] };
-      groups.set(key, grouped); output.push(grouped);
-    }
-  }
-  return output;
-}
-
 export function ProductAdmin() {
+  const pathname = usePathname();
+  const module = pathname.split("/")[3] || "";
+  const activeModule = productModules.find((item) => item.id === module);
   const [drafts, setDrafts] = useState<DraftProduct[]>([]);
-  const [form, setForm] = useState(emptyProduct);
   const [preview, setPreview] = useState<ReturnType<typeof rowToProduct>[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [categorySearch, setCategorySearch] = useState("");
@@ -133,8 +35,17 @@ export function ProductAdmin() {
   const [imageUrl, setImageUrl] = useState("");
   const [savingIds, setSavingIds] = useState<string[]>([]);
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
+  const productOperations = useRef(new Set<string>());
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [loadingCloud, setLoadingCloud] = useState(true);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [childBusy, setChildBusy] = useState(false);
+  const [catalogBrand, setCatalogBrand] = useState("");
+  const [catalogCategory, setCatalogCategory] = useState("");
+  const [catalogPage, setCatalogPage] = useState(0);
+  const [catalogPageSize, setCatalogPageSize] = useState(50);
+  const [bulkBrand, setBulkBrand] = useState("");
+  const [bulkCategory, setBulkCategory] = useState("");
   const [savingOffers, setSavingOffers] = useState(false);
   const [offerSearch, setOfferSearch] = useState("");
   const [offerCategory, setOfferCategory] = useState("Todas");
@@ -142,34 +53,37 @@ export function ProductAdmin() {
   const [showFeaturedOnly, setShowFeaturedOnly] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogStatus, setCatalogStatus] = useState("Todos");
-  const [quickPriceSearch, setQuickPriceSearch] = useState("");
-  const [pricePaste, setPricePaste] = useState("");
   const [bulkPercent, setBulkPercent] = useState(10);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [modalTool, setModalTool] = useState<"paste" | "diameter" | "percent" | null>(null);
+  const [modalPricePaste, setModalPricePaste] = useState("");
+  const [modalTargetDiameter, setModalTargetDiameter] = useState("");
+  const [modalDiameterPrice, setModalDiameterPrice] = useState("");
+  const [modalVariantPercent, setModalVariantPercent] = useState(10);
+  const [pendingCloudSaveIds, setPendingCloudSaveIds] = useState<string[]>([]);
 
   useEffect(() => {
-    const local = (() => { try { return JSON.parse(localStorage.getItem(storageKey) ?? "[]") as DraftProduct[]; } catch { return []; } })();
+    let active = true;
+    const local = (() => { try { const value = JSON.parse(localStorage.getItem(storageKey) ?? "[]"); return Array.isArray(value) ? value.filter((item) => item && typeof item.id === "string" && typeof item.sku === "string" && typeof item.name === "string") as DraftProduct[] : []; } catch { return []; } })();
     setDrafts(local); setHydrated(true);
-    const supabase = createSupabaseBrowserClient(); const db: any = supabase;
-    db.from("products").select("id,slug,name,sku,brand,category,price,transfer_price,stock,badge,published,featured,offer_price,specs,product_images(storage_path,external_url,position),product_variants(id,sku,options,price,transfer_price,stock)").order("name").then(({ data, error }: { data: any[] | null; error: { message: string } | null }) => {
-      if (error) { setNotice(`No se pudieron cargar los productos existentes: ${error.message}`); setLoadingCloud(false); return; }
-      const cloud: DraftProduct[] = (data ?? []).map((row) => {
-        const images = [...(row.product_images ?? [])].sort((a, b) => a.position - b.position).map((image) => image.external_url || (image.storage_path ? supabase.storage.from("product-images").getPublicUrl(image.storage_path).data.publicUrl : "")).filter(Boolean);
-        const variants: LocalProductVariant[] = (row.product_variants ?? []).map((variant: any) => ({ id: variant.id, sku: variant.sku, diameter: variant.options?.["Diámetro"] ?? "", length: variant.options?.Largo ?? "", pitch: variant.options?.Paso ?? "", price: Number(variant.price), transferPrice: Number(variant.transfer_price), stock: variant.stock }));
-        return { id: row.id, remoteId: row.id, savedPublished: row.published, savedFeatured: row.featured, slug: row.slug, name: row.name, sku: row.sku, brand: row.brand, category: row.category, price: Number(row.price), transferPrice: Number(row.transfer_price), stock: row.stock, image: images[0] ?? "", images, imageStoragePaths: (row.product_images ?? []).map((image: any) => image.storage_path).filter(Boolean), badge: row.badge ?? "", diameter: row.specs?.["Diámetro"] ?? "", length: row.specs?.Largo ?? "", variants: variants.length ? variants : undefined, published: row.published, featured: row.featured, offerPrice: row.offer_price == null ? 0 : Number(row.offer_price) };
-      });
-      const cloudSkus = new Set(cloud.map((item) => item.sku));
-      setDrafts([...cloud, ...local.filter((item) => !cloudSkus.has(item.sku))]); setLoadingCloud(false);
-    });
+    loadAdminCatalog().then((cloud) => { if (active) { setDrafts(mergeAdminDrafts(cloud, local)); setCloudReady(true); } })
+      .catch((error) => { if (active) setNotice(error.message); })
+      .finally(() => { if (active) setLoadingCloud(false); });
+    return () => { active = false; };
   }, []);
   useEffect(() => {
     if (!hydrated) return;
     try { localStorage.setItem(storageKey, JSON.stringify(drafts)); }
     catch { setNotice("No queda espacio en el navegador para más fotos. Usá URLs o quitá alguna imagen cargada."); }
   }, [drafts, hydrated]);
+  useEffect(() => { setEditingId(null); setImageUrl(""); }, [module]);
+  useEffect(() => { setCatalogPage(0); }, [catalogSearch, catalogStatus, catalogBrand, catalogCategory, catalogPageSize]);
   useEffect(() => {
     if (!editingId) return;
+    setModalTool(null);
+    setModalPricePaste("");
+    setModalDiameterPrice("");
     const previous = document.body.style.overflow; document.body.style.overflow = "hidden";
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") setEditingId(null); };
     window.addEventListener("keydown", close);
@@ -201,28 +115,28 @@ export function ProductAdmin() {
         || (catalogStatus === "Sin imagen" && images.length === 0)
         || (catalogStatus === "Sin publicar" && !item.published)
         || (catalogStatus === "Sin stock" && item.stock <= 0)
+        || (catalogStatus === "Pendientes" && (item.dirty || !item.remoteId))
         || (catalogStatus === "Listos" && item.price > 0 && images.length > 0 && item.stock > 0);
-      return matchesStatus && (!term || `${item.name} ${item.sku} ${item.brand} ${item.category}`.toLocaleLowerCase("es").includes(term));
+      return matchesStatus && (!catalogBrand || item.brand === catalogBrand) && (!catalogCategory || item.category === catalogCategory)
+        && (catalogStatus !== "Pendientes" || item.dirty || !item.remoteId)
+        && (!term || `${item.name} ${item.sku} ${item.brand} ${item.category} ${(item.variants || []).map((variant) => variant.sku).join(" ")}`.toLocaleLowerCase("es").includes(term));
     });
-  }, [catalogSearch, catalogStatus, drafts]);
-  const quickPriceProducts = useMemo(() => {
-    const term = quickPriceSearch.trim().toLocaleLowerCase("es");
-    return drafts.filter((item) => !item.remoteId && (!term || `${item.name} ${item.sku} ${item.category}`.toLocaleLowerCase("es").includes(term)));
-  }, [drafts, quickPriceSearch]);
-
+  }, [catalogSearch, catalogStatus, catalogBrand, catalogCategory, drafts]);
+  const catalogPages = Math.max(1, Math.ceil(filteredDrafts.length / catalogPageSize));
+  const currentCatalogPage = Math.min(catalogPage, catalogPages - 1);
+  const visibleDrafts = filteredDrafts.slice(currentCatalogPage * catalogPageSize, (currentCatalogPage + 1) * catalogPageSize);
+  const dirtyDrafts = drafts.filter((item) => item.dirty || !item.remoteId);
+  const workspaceBusy = bulkSaving || childBusy || savingIds.length > 0 || deletingIds.length > 0 || savingOffers;
   useEffect(() => { setSelectedCategories(categories); }, [categories]);
 
-  function update(name: keyof typeof form, value: string | number | boolean) { setForm((current) => ({ ...current, [name]: value })); }
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    setDrafts((current) => [...current, { ...form, id: crypto.randomUUID(), images: form.image ? [form.image] : [], published: form.published && Boolean(form.image && form.price && form.transferPrice) }]);
-    setForm(emptyProduct); setNotice("Artículo guardado como borrador local.");
-  }
   async function readCatalogFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; if (!file) return;
     try {
       if (file.name.toLowerCase().endsWith(".csv")) {
-        const text = new TextDecoder("windows-1252").decode(await file.arrayBuffer());
+        const buffer = await file.arrayBuffer();
+        let text: string;
+        try { text = new TextDecoder("utf-8", { fatal: true }).decode(buffer); }
+        catch { text = new TextDecoder("windows-1252").decode(buffer); }
         const rows = parseDelimited(text, ";");
         const erpColumns = ["Código", "Artículo", "Rubro", "Stock", "Marca"];
         const headerIndex = rows.findIndex((row) => erpColumns.every((column) => row.includes(column)));
@@ -263,16 +177,22 @@ export function ProductAdmin() {
         }
         return rowToProduct([slug, articleValue(article, "nombre"), value(row, "sku"), articleValue(article, "marca"), articleValue(article, "categoria"), value(row, "precio"), value(row, "precio_transferencia"), value(row, "stock"), value(row, "diametro"), value(row, "largo"), articleValue(article, "imagen_url"), articleValue(article, "etiqueta"), articleValue(article, "publicado")], columns, index + 4);
       });
-      setPreview(parsed); setNotice("");
+      setPreview(groupTemplateVariants(parsed)); setNotice("");
     } catch (error) {
       setPreview([]); setNotice(error instanceof Error ? error.message : "No se pudo leer el archivo Excel.");
     }
   }
   function importValid() {
-    const existingSkus = new Set(drafts.map((draft) => draft.sku));
-    const newProducts = validRows.map((item) => item.product).filter((product) => !existingSkus.has(product.sku));
+    if (!cloudReady || workspaceBusy) return;
+    const existingSkus = new Set(drafts.flatMap((draft) => [draft.sku, ...(draft.variants || []).map((variant) => variant.sku)]).map((sku) => sku.toLowerCase()));
+    const newProducts = validRows.map((item) => item.product).filter((product) => {
+      const codes = [product.sku, ...(product.variants || []).map((variant) => variant.sku)].map((sku) => sku.toLowerCase());
+      if (codes.some((sku) => existingSkus.has(sku))) return false;
+      codes.forEach((sku) => existingSkus.add(sku)); return true;
+    }).map((product) => ({ ...product, dirty: true }));
     const skipped = validRows.length - newProducts.length;
     setDrafts((current) => [...current, ...newProducts]); setPreview([]); setNotice(`${newProducts.length} artículos importados como borradores.${skipped ? ` ${skipped} ya existían y no se duplicaron.` : ""}`);
+    setPendingCloudSaveIds((current) => [...new Set([...current, ...newProducts.map((item) => item.id)])]);
   }
   function toggleCategory(category: string) {
     setSelectedCategories((current) => current.includes(category) ? current.filter((item) => item !== category) : [...current, category]);
@@ -281,9 +201,9 @@ export function ProductAdmin() {
     setSelectedCategories((current) => select ? [...new Set([...current, ...filteredCategories])] : current.filter((category) => !filteredCategories.includes(category)));
   }
   function clearImportFilters() { setCategorySearch(""); setBrandFilter("Todas"); setMinimumStock(0); setShowSelectedOnly(false); }
-  function patchDraft(id: string, patch: Partial<DraftProduct>) {
+  function patchDraft(id: string, patch: Partial<DraftProduct>, dirty = true) {
     setNotice("");
-    setDrafts((current) => current.map((draft) => draft.id === id ? { ...draft, ...patch } : draft));
+    setDrafts((current) => current.map((draft) => draft.id === id ? { ...draft, ...patch, dirty } : draft));
   }
   function addImageUrl(draft: DraftProduct) {
     const url = imageUrl.trim(); if (!url) return;
@@ -310,62 +230,67 @@ export function ProductAdmin() {
     patchDraft(draft.id, { variants, stock: variants.reduce((total, variant) => total + variant.stock, 0) });
   }
   async function saveToSupabase(draft: DraftProduct) {
-    const pendingUrl = imageUrl.trim();
+    if (!cloudReady) { setNotice("Esperá a que se cargue el catálogo antes de guardar."); return false; }
+    if (productOperations.current.has(draft.id)) return false;
+    const variantSkus = (draft.variants || []).map((variant) => variant.sku.trim().toLowerCase());
+    const otherCodes = new Set(drafts.filter((item) => item.id !== draft.id).flatMap((item) => [item.sku, ...(item.variants || []).map((variant) => variant.sku)]).map((sku) => sku.trim().toLowerCase()));
+    if (!draft.name.trim() || !draft.sku.trim() || variantSkus.some((sku) => !sku || otherCodes.has(sku)) || new Set(variantSkus).size !== variantSkus.length || otherCodes.has(draft.sku.trim().toLowerCase())) {
+      setNotice("Completá nombre y códigos únicos. Hay un código vacío o repetido en el catálogo o entre las medidas."); return false;
+    }
+    const pendingUrl = editingId === draft.id ? imageUrl.trim() : "";
     const images = [...new Set([...(draft.images ?? []), draft.image, pendingUrl].filter(Boolean))];
     if (pendingUrl) { patchDraft(draft.id, { images, image: images[0] ?? "" }); setImageUrl(""); }
     const variantPricesComplete = Boolean(draft.variants?.length && draft.variants.every((variant) => variant.price > 0));
     const effectivePrice = draft.price || (variantPricesComplete ? Math.min(...draft.variants!.map((variant) => variant.price)) : 0);
-    if (draft.published && (!effectivePrice || !images.length)) { setNotice(`Para publicar, ${draft.variants?.length ? "completá el precio de todas las medidas" : "completá el precio"} y agregá al menos una foto. También podés desmarcar la publicación y guardarlo como borrador.`); return; }
+    if (draft.published && (!effectivePrice || !images.length)) { setNotice(`Para publicar, ${draft.variants?.length ? "completá el precio de todas las medidas" : "completá el precio"} y agregá al menos una foto. También podés desmarcar la publicación y guardarlo como borrador.`); return false; }
+    productOperations.current.add(draft.id);
     setSavingIds((current) => [...current, draft.id]); setNotice("Guardando producto y fotos en Supabase…");
     try {
       const supabase = createSupabaseBrowserClient();
       // The generated database types will replace this narrow bridge once the remote schema is linked to the CLI.
       const db: any = supabase;
       const effectiveTransferPrice = draft.transferPrice || transferFromPrice(effectivePrice);
-      const { data: product, error } = await db.from("products").upsert({ slug: draft.slug, name: draft.name, sku: draft.sku, brand: draft.brand, category: draft.category, price: effectivePrice, transfer_price: effectiveTransferPrice, stock: draft.stock, badge: draft.badge || null, specs: { ...(draft.diameter ? { "Diámetro": draft.diameter } : {}), ...(draft.length ? { Largo: draft.length } : {}) }, published: draft.published, featured: draft.featured, offer_price: draft.offerPrice || null }, { onConflict: "sku" }).select("id").single();
-      if (error) throw error;
-      if (draft.variants?.length) {
-        const { error: clearVariantsError } = await db.from("product_variants").delete().eq("product_id", product.id);
-        if (clearVariantsError) throw clearVariantsError;
-        const { error: variantsError } = await db.from("product_variants").insert(draft.variants.map((variant) => ({ product_id: product.id, sku: variant.sku, options: { ...(variant.diameter ? { Diámetro: variant.diameter } : {}), ...(variant.pitch ? { Paso: variant.pitch } : {}), ...(variant.length ? { Largo: variant.length } : {}) }, price: variant.price || draft.price, transfer_price: variant.transferPrice || effectiveTransferPrice, stock: variant.stock })));
-        if (variantsError) throw variantsError;
-      }
-      const { error: clearError } = await db.from("product_images").delete().eq("product_id", product.id);
-      if (clearError) throw clearError;
+      const uploadFolder = draft.remoteId || crypto.randomUUID();
       const rows = [];
       for (let index = 0; index < images.length; index += 1) {
         const source = images[index];
         if (source.startsWith("data:")) {
           const blob = await (await fetch(source)).blob();
-          const path = `${product.id}/${index}-${Date.now()}.jpg`;
-          const { error: uploadError } = await supabase.storage.from("product-images").upload(path, blob, { contentType: "image/jpeg", upsert: true });
+          const path = `${uploadFolder}/${crypto.randomUUID()}.jpg`;
+          const { error: uploadError } = await supabase.storage.from("product-images").upload(path, blob, { contentType: "image/jpeg" });
           if (uploadError) throw uploadError;
-          rows.push({ product_id: product.id, storage_path: path, external_url: null, alt_text: draft.name, position: index });
-        } else rows.push({ product_id: product.id, storage_path: null, external_url: source, alt_text: draft.name, position: index });
+          rows.push({ storage_path: path, external_url: null, alt_text: draft.name });
+        } else rows.push({ storage_path: null, external_url: source, alt_text: draft.name });
       }
-      if (rows.length) {
-        const { error: imageError } = await db.from("product_images").insert(rows);
-        if (imageError) throw imageError;
-      }
-      patchDraft(draft.id, { remoteId: product.id, savedPublished: draft.published, savedFeatured: draft.featured, price: effectivePrice, transferPrice: effectiveTransferPrice, imageStoragePaths: rows.map((row) => row.storage_path).filter((path): path is string => Boolean(path)) });
+      const variants = (draft.variants ?? []).map((variant) => ({ ...variant, id: variant.id || crypto.randomUUID() }));
+      const { data: productId, error } = await db.rpc("save_catalog_product", {
+        p_product: { id: draft.remoteId || uploadFolder, slug: draft.slug, name: draft.name, sku: draft.sku, brand: draft.brand, category: draft.category, price: effectivePrice, transfer_price: effectiveTransferPrice, stock: draft.stock, badge: draft.badge || null, specs: { ...(draft.diameter ? { "Diámetro": draft.diameter } : {}), ...(draft.length ? { Largo: draft.length } : {}) }, published: draft.published, featured: draft.featured, offer_price: draft.offerPrice || null },
+        p_variants: variants.map((variant) => ({ id: variant.id, sku: variant.sku, options: { ...(variant.diameter ? { Diámetro: variant.diameter } : {}), ...(variant.pitch ? { Paso: variant.pitch } : {}), ...(variant.length ? { Largo: variant.length } : {}) }, price: variant.price || draft.price, transfer_price: variant.transferPrice || effectiveTransferPrice, stock: variant.stock })),
+        p_images: rows,
+      });
+      if (error) throw new Error(error.code === "PGRST202" ? "Falta aplicar la migración de permisos y respaldos en Supabase para guardar productos." : error.message);
+      const savedImages = rows.map((row) => row.storage_path ? supabase.storage.from("product-images").getPublicUrl(row.storage_path).data.publicUrl : row.external_url!);
+      patchDraft(draft.id, { remoteId: productId, variants: variants.length ? variants : undefined, images: savedImages, image: savedImages[0] ?? "", savedPublished: draft.published, savedFeatured: draft.featured, price: effectivePrice, transferPrice: effectiveTransferPrice, imageStoragePaths: rows.map((row) => row.storage_path).filter((path): path is string => Boolean(path)) }, false);
       setNotice(`${draft.name} quedó guardado en Supabase${draft.published ? " y publicado en la tienda" : " como borrador"}.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo guardar el producto en Supabase."); }
-    finally { setSavingIds((current) => current.filter((id) => id !== draft.id)); }
+      return true;
+    } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo guardar el producto en Supabase."); return false; }
+    finally { productOperations.current.delete(draft.id); setSavingIds((current) => current.filter((id) => id !== draft.id)); }
   }
   async function removeProduct(draft: DraftProduct) {
     if (!draft.remoteId) return;
     const supabase = createSupabaseBrowserClient(); const db: any = supabase;
-    const paths = draft.imageStoragePaths ?? [];
-    if (paths.length) { const { error: storageError } = await supabase.storage.from("product-images").remove(paths); if (storageError) throw storageError; }
-    const { error } = await db.from("products").delete().eq("id", draft.remoteId);
+    // Keep image files: previous versions and backups may still reference them.
+    const { error } = await db.from("products").delete().eq("id", draft.remoteId).select("id").single();
     if (error) throw error;
   }
   async function deleteProducts(items: DraftProduct[]) {
     if (!items.length) return;
+    if (items.some((item) => productOperations.current.has(item.id))) { setNotice("Esperá a que terminen las operaciones pendientes de estos productos."); return; }
     const label = items.length === 1 ? `“${items[0].name}”` : `${items.length} artículos`;
     const hasRemoteProducts = items.some((item) => item.remoteId);
     if (!window.confirm(`¿Eliminar ${label}?${hasRemoteProducts ? " También se quitarán de la tienda y de Supabase." : ""}`)) return;
     const ids = items.map((item) => item.id);
+    ids.forEach((id) => productOperations.current.add(id));
     setDeletingIds((current) => [...new Set([...current, ...ids])]);
     const removedIds: string[] = [], errors: string[] = [];
     try {
@@ -377,7 +302,7 @@ export function ProductAdmin() {
       setSelectedProductIds((current) => current.filter((id) => !removedIds.includes(id)));
       if (editingId && removedIds.includes(editingId)) setEditingId(null);
       setNotice(errors.length ? `${removedIds.length} artículos eliminados. No se pudieron eliminar ${errors.length}: ${errors.join(" · ")}` : `${removedIds.length} artículo${removedIds.length === 1 ? "" : "s"} eliminado${removedIds.length === 1 ? "" : "s"}.`);
-    } finally { setDeletingIds((current) => current.filter((id) => !ids.includes(id))); }
+    } finally { ids.forEach((id) => productOperations.current.delete(id)); setDeletingIds((current) => current.filter((id) => !ids.includes(id))); }
   }
   function deleteProduct(draft: DraftProduct) { return deleteProducts([draft]); }
   function toggleProductSelection(id: string) {
@@ -385,51 +310,205 @@ export function ProductAdmin() {
   }
 
   function patchSelected(patch: Partial<DraftProduct>) {
-    setDrafts((current) => current.map((item) => selectedProductIds.includes(item.id) ? { ...item, ...patch } : item));
+    setDrafts((current) => current.map((item) => selectedProductIds.includes(item.id) ? { ...item, ...patch, dirty: true } : item));
   }
 
   function adjustSelectedPrices() {
-    const factor = 1 + bulkPercent / 100;
-    setDrafts((current) => current.map((item) => selectedProductIds.includes(item.id) ? (() => {
-      const price = Math.round(item.price * factor);
-      return { ...item, price, transferPrice: transferFromPrice(price) };
-    })() : item));
-    setNotice(`Se aplicó ${bulkPercent}% a ${selectedProductIds.length} productos. Revisá los valores y guardá los cambios.`);
+    try {
+      const products = drafts.filter((item) => selectedProductIds.includes(item.id));
+      const result = buildPricePreview(products, percentageInputs(products, bulkPercent, "", ""));
+      const next = applyPriceChanges(drafts, result.changes).map((item) => ({ ...item, image: item.image || "" }));
+      setDrafts(next);
+      setNotice(`Se preparó ${bulkPercent}% en ${result.changes.length} precios, incluidas las medidas. Revisá los valores antes de guardar.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo preparar el ajuste."); }
   }
 
-  function applyPastedPrices() {
-    const entries = pricePaste.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
-      const parts = line.includes("\t") ? line.split("\t") : line.includes(";") ? line.split(";") : line.split(/\s+/);
-      return [parts[0]?.trim(), decimal(parts.slice(1).join(" ").trim())] as const;
-    }).filter(([sku, price]) => sku && Number.isFinite(price) && price > 0);
-    const prices = new Map(entries);
-    let matches = 0;
-    setDrafts((current) => current.map((item) => {
-      const directPrice = prices.get(item.sku);
-      if (directPrice) { matches += 1; return { ...item, price: directPrice, transferPrice: transferFromPrice(directPrice) }; }
-      if (!item.variants?.length) return item;
-      let changed = false;
-      const variants = item.variants.map((variant) => {
-        const price = prices.get(variant.sku);
-        if (!price) return variant;
-        matches += 1; changed = true;
-        return { ...variant, price, transferPrice: transferFromPrice(price) };
+  async function handleModalFilePrices(event: ChangeEvent<HTMLInputElement>, item: DraftProduct) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const records = await readPriceRecordsFromFile(file);
+      if (!records.length) throw new Error("No se detectaron columnas con código y precio.");
+      const lookup = buildPriceLookup(records);
+      let matched = 0;
+      const updatedVariants = (item.variants ?? []).map((v) => {
+        const match = findPriceInLookup(lookup, v.sku);
+        if (match) {
+          matched += 1;
+          return { ...v, price: match.price, transferPrice: match.transferPrice || transferFromPrice(match.price) };
+        }
+        return v;
       });
-      if (!changed) return item;
-      const completedPrices = variants.map((variant) => variant.price).filter((price) => price > 0);
-      return { ...item, variants, price: completedPrices.length ? Math.min(...completedPrices) : item.price, transferPrice: completedPrices.length ? transferFromPrice(Math.min(...completedPrices)) : item.transferPrice };
-    }));
-    setPricePaste("");
-    setNotice(`${matches} precio${matches === 1 ? "" : "s"} aplicado${matches === 1 ? "" : "s"} por SKU.`);
+      const validPrices = updatedVariants.map((v) => v.price).filter((p) => p > 0);
+      const minPrice = validPrices.length ? Math.min(...validPrices) : item.price;
+      patchDraft(item.id, {
+        variants: updatedVariants,
+        price: minPrice,
+        transferPrice: transferFromPrice(minPrice),
+      });
+      setNotice(`✅ Se asignaron precios a ${matched} medidas de ${item.name} desde el archivo.`);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Error al leer el archivo de precios.");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function handleModalPastePrices(item: DraftProduct) {
+    const text = modalPricePaste.trim();
+    if (!text) return;
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const hasDelimiter = lines.some((l) => l.includes("\t") || l.includes(";") || l.includes(","));
+    if (hasDelimiter) {
+      const records = parsePricePasteText(text);
+      const lookup = buildPriceLookup(records);
+      let matched = 0;
+      const updatedVariants = (item.variants ?? []).map((v) => {
+        const match = findPriceInLookup(lookup, v.sku);
+        if (match) {
+          matched += 1;
+          return { ...v, price: match.price, transferPrice: match.transferPrice || transferFromPrice(match.price) };
+        }
+        return v;
+      });
+      const validPrices = updatedVariants.map((v) => v.price).filter((p) => p > 0);
+      const minPrice = validPrices.length ? Math.min(...validPrices) : item.price;
+      patchDraft(item.id, {
+        variants: updatedVariants,
+        price: minPrice,
+        transferPrice: transferFromPrice(minPrice),
+      });
+      setNotice(`✅ Se asignaron precios por SKU a ${matched} medidas.`);
+    } else {
+      const numbers = lines.map((l) => parsePriceValue(l)).filter((n) => n > 0);
+      let matched = 0;
+      const updatedVariants = (item.variants ?? []).map((v, idx) => {
+        if (idx < numbers.length && numbers[idx] > 0) {
+          matched += 1;
+          const p = numbers[idx];
+          return { ...v, price: p, transferPrice: transferFromPrice(p) };
+        }
+        return v;
+      });
+      const validPrices = updatedVariants.map((v) => v.price).filter((p) => p > 0);
+      const minPrice = validPrices.length ? Math.min(...validPrices) : item.price;
+      patchDraft(item.id, {
+        variants: updatedVariants,
+        price: minPrice,
+        transferPrice: transferFromPrice(minPrice),
+      });
+      setNotice(`✅ Se asignaron ${matched} precios correlativos en el orden de la tabla.`);
+    }
+    setModalPricePaste("");
+    setModalTool(null);
+  }
+
+  function handleModalDiameterPrice(item: DraftProduct) {
+    const p = parsePriceValue(modalDiameterPrice);
+    if (!modalTargetDiameter || p <= 0) return;
+    let matched = 0;
+    const updatedVariants = (item.variants ?? []).map((v) => {
+      if (v.diameter === modalTargetDiameter) {
+        matched += 1;
+        return { ...v, price: p, transferPrice: transferFromPrice(p) };
+      }
+      return v;
+    });
+    const validPrices = updatedVariants.map((v) => v.price).filter((price) => price > 0);
+    const minPrice = validPrices.length ? Math.min(...validPrices) : item.price;
+    patchDraft(item.id, {
+      variants: updatedVariants,
+      price: minPrice,
+      transferPrice: transferFromPrice(minPrice),
+    });
+    setNotice(`✅ Se asignó $${p.toLocaleString("es-AR")} a las ${matched} medidas de diámetro ${modalTargetDiameter}.`);
+    setModalDiameterPrice("");
+    setModalTool(null);
+  }
+
+  function handleModalCopyBasePrice(item: DraftProduct) {
+    const base = item.price;
+    if (!base || base <= 0) {
+      setNotice("Ingresá un precio base arriba primero para poder copiarlo.");
+      return;
+    }
+    let filled = 0;
+    const updatedVariants = (item.variants ?? []).map((v) => {
+      if (!v.price || v.price <= 0) {
+        filled += 1;
+        return { ...v, price: base, transferPrice: item.transferPrice || transferFromPrice(base) };
+      }
+      return v;
+    });
+    patchDraft(item.id, { variants: updatedVariants });
+    setNotice(`✅ Se completó el precio base ($${base.toLocaleString("es-AR")}) en ${filled} medidas.`);
+  }
+
+  function handleModalAdjustPercent(item: DraftProduct) {
+    const factor = 1 + modalVariantPercent / 100;
+    let adjusted = 0;
+    const updatedVariants = (item.variants ?? []).map((v) => {
+      if (!v.price || v.price <= 0) return v;
+      adjusted += 1;
+      const p = Math.round(v.price * factor);
+      return { ...v, price: p, transferPrice: transferFromPrice(p) };
+    });
+    const validPrices = updatedVariants.map((v) => v.price).filter((p) => p > 0);
+    const minPrice = validPrices.length ? Math.min(...validPrices) : item.price;
+    patchDraft(item.id, {
+      variants: updatedVariants,
+      price: minPrice,
+      transferPrice: transferFromPrice(minPrice),
+    });
+    setNotice(`✅ Se ajustó un ${modalVariantPercent}% a ${adjusted} medidas.`);
+    setModalTool(null);
   }
 
   async function saveSelectedProducts() {
     const selected = drafts.filter((item) => selectedProductIds.includes(item.id));
-    if (!selected.length) return;
+    if (!selected.length || bulkSaving) return;
     setBulkSaving(true);
-    for (const item of selected) await saveToSupabase(item);
+    let saved = 0;
+    for (const item of selected) if (await saveToSupabase(item)) saved++;
     setBulkSaving(false);
-    setNotice(`${selected.length} producto${selected.length === 1 ? "" : "s"} procesado${selected.length === 1 ? "" : "s"}.`);
+    setNotice(`${saved} productos guardados.${saved < selected.length ? ` ${selected.length - saved} no se guardaron; abrí uno y guardalo para revisar el error.` : ""}`);
+  }
+
+  async function saveProductBatch(items: DraftProduct[], progress: (message: string) => void = setNotice) {
+    if (bulkSaving || !cloudReady) return [];
+    setBulkSaving(true);
+    const updates = new Map(items.map((item) => [item.id, item]));
+    setDrafts((current) => current.map((item) => updates.has(item.id) ? { ...updates.get(item.id)!, dirty: true } : item));
+    const saved: string[] = [];
+    try {
+      for (const [index, item] of items.entries()) {
+        progress(`Guardando artículo ${index + 1} de ${items.length}: ${item.name}`);
+        if (await saveToSupabase(item)) saved.push(item.id);
+      }
+      setPendingCloudSaveIds((current) => current.filter((id) => !saved.includes(id)));
+      setNotice(`${saved.length} artículos guardados.${saved.length < items.length ? ` ${items.length - saved.length} siguen pendientes. Abrí uno desde Catálogo para revisar el error.` : ""}`);
+      return saved;
+    } finally { setBulkSaving(false); }
+  }
+
+  async function addQuickProducts(items: DraftProduct[]) {
+    setDrafts((current) => [...current, ...items]);
+    setPendingCloudSaveIds((current) => [...new Set([...current, ...items.map((item) => item.id)])]);
+    const saved = await saveProductBatch(items);
+    return { saved: saved.length, total: items.length };
+  }
+
+  async function discardPending() {
+    if (!dirtyDrafts.length || workspaceBusy || !window.confirm(`¿Descartar ${dirtyDrafts.length} artículos con cambios pendientes? Los productos guardados volverán a su versión de Supabase y los borradores solo locales se quitarán.`)) return;
+    setLoadingCloud(true);
+    try { setDrafts(await loadAdminCatalog()); setPendingCloudSaveIds([]); setSelectedProductIds([]); setNotice("Cambios pendientes descartados. El catálogo guardado no fue modificado."); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo recuperar el catálogo guardado."); }
+    finally { setLoadingCloud(false); }
+  }
+
+  function addVariant(draft: DraftProduct) {
+    const variants = draft.variants?.length ? draft.variants : [{ id: crypto.randomUUID(), sku: draft.sku, diameter: draft.diameter, length: draft.length, price: draft.price, transferPrice: draft.transferPrice, stock: draft.stock }];
+    patchDraft(draft.id, { ...(!draft.variants?.length ? { sku: `GRP-${crypto.randomUUID().slice(0, 8).toUpperCase()}` } : {}), variants: [...variants, { id: crypto.randomUUID(), sku: "", diameter: "", length: "", price: 0, transferPrice: 0, stock: 0 }] });
   }
 
   function toggleFeatured(id: string) {
@@ -463,32 +542,20 @@ export function ProductAdmin() {
   }
 
   return <div className="admin-stack">
-    <section className="admin-note"><strong>Preparación local</strong><span>Los datos quedan guardados en este navegador. La publicación real se habilitará al conectar la base de datos y el acceso de administradores.</span></section>
-    <section className="card admin-card">
-      <div className="admin-heading"><div><span className="eyebrow">Carga manual</span><h2><PackagePlus size={24} /> Nuevo artículo</h2></div></div>
-      <form className="product-form" onSubmit={submit}>
-        <label className="wide">Nombre<input required value={form.name} onChange={(e) => update("name", e.target.value)} /></label>
-        <label>Slug<input required value={form.slug} onChange={(e) => update("slug", e.target.value)} placeholder="bulon-hexagonal-g5" /></label>
-        <label>SKU<input required value={form.sku} onChange={(e) => update("sku", e.target.value)} /></label>
-        <label>Marca<input required value={form.brand} onChange={(e) => update("brand", e.target.value)} /></label>
-        <label>Categoría<input required value={form.category} onChange={(e) => update("category", e.target.value)} /></label>
-        <label>Precio<input required min="1" type="number" value={form.price || ""} onChange={(e) => { const price = Number(e.target.value); setForm((current) => ({ ...current, price, transferPrice: transferFromPrice(price) })); }} /></label>
-        <label>Transferencia<input required min="1" type="number" value={form.transferPrice || ""} onChange={(e) => update("transferPrice", Number(e.target.value))} /></label>
-        <label>Stock<input required min="0" type="number" value={form.stock} onChange={(e) => update("stock", Number(e.target.value))} /></label>
-        <label>Diámetro opcional<input value={form.diameter} onChange={(e) => update("diameter", e.target.value)} /></label>
-        <label>Largo opcional<input value={form.length} onChange={(e) => update("length", e.target.value)} /></label>
-        <label>Etiqueta<input value={form.badge} onChange={(e) => update("badge", e.target.value)} placeholder="Oferta" /></label>
-        <label className="wide">URL de imagen<input value={form.image} onChange={(e) => update("image", e.target.value)} /></label>
-        <label className="check-field wide"><input type="checkbox" checked={form.published} onChange={(e) => update("published", e.target.checked)} /> Marcar para publicar</label>
-        <button className="button" type="submit"><Save size={18} /> Guardar borrador</button>
-      </form>
-    </section>
-
+    <div className="admin-title product-workspace-title"><div><span className="eyebrow">Administración de productos</span><h1>{activeModule?.title || "Productos"}</h1><p>{activeModule?.description || "Elegí la tarea que querés realizar."}</p></div><div className="product-workspace-summary"><strong>{drafts.length}</strong><span>artículos · {dirtyDrafts.length} pendientes</span></div></div>
+    {activeModule && <nav className="product-module-nav" aria-label="Módulos de productos"><Link href="/admin/productos" onClick={(event) => { if (workspaceBusy) event.preventDefault(); }}>Todos los módulos</Link>{productModules.map((item) => <Link key={item.id} href={`/admin/productos/${item.id}`} aria-current={module === item.id ? "page" : undefined} aria-disabled={workspaceBusy} onClick={(event) => { if (workspaceBusy) event.preventDefault(); }}>{item.title}</Link>)}</nav>}
+    {loadingCloud && <p role="status" className="admin-notice">Cargando el catálogo completo…</p>}
+    {!loadingCloud && !cloudReady && <p role="alert" className="admin-notice">No se pudo cargar el catálogo. Recargá la página antes de guardar o importar artículos.</p>}
+    {!activeModule && <div className="product-module-grid">{productModules.map((item, index) => <Link className="product-module-card" key={item.id} href={`/admin/productos/${item.id}`}><span className="module-number">0{index + 1}</span><h2>{item.title}</h2><p>{item.description}</p><strong>{item.action} →</strong></Link>)}</div>}
+    <div hidden={module !== "carga"}><ProductQuickEntry products={drafts} disabled={!cloudReady || workspaceBusy} onCreate={addQuickProducts} /></div>
+    <div hidden={module !== "precios"}><ProductPriceManager products={drafts} disabled={!cloudReady || bulkSaving || savingOffers} onSave={saveProductBatch} onBusyChange={setChildBusy} /></div>
+    {(module === "carga" || module === "importar") && pendingCloudSaveIds.length > 0 && <div className="workspace-savebar"><span><strong>{pendingCloudSaveIds.length}</strong> artículos del lote pendientes de guardar. También podés completarlos desde Catálogo.</span><button className="button" disabled={workspaceBusy || !cloudReady} onClick={() => void saveProductBatch(drafts.filter((item) => pendingCloudSaveIds.includes(item.id)))}>Guardar lote pendiente</button></div>}
+    {module === "importar" && <>
     <section className="card admin-card">
       <div className="admin-heading"><div><span className="eyebrow">Carga masiva</span><h2><FileUp size={24} /> Importar catálogo</h2></div><a className="button-outline" href="/plantillas/plantilla-articulos.xlsx" download><Download size={17} /> Descargar plantilla Excel</a></div>
       <p>Podés subir la plantilla Excel completa o el listado de stock CSV exportado directamente desde el ERP.</p>
       <p className="import-warning"><strong>Importante:</strong> subí el CSV original del ERP sin abrirlo ni volverlo a guardar con Excel. El panel lee la columna Código como texto y conserva los dígitos y ceros iniciales.</p>
-      <label className="file-drop"><FileUp size={28} /><span>Seleccionar Excel o CSV del ERP</span><input type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={readCatalogFile} /></label>
+      <label className="file-drop"><FileUp size={28} /><span>Seleccionar Excel o CSV del ERP</span><input type="file" disabled={!cloudReady || workspaceBusy} accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={readCatalogFile} /></label>
       {preview.length ? <>
         <div className="category-selector">
           <div className="category-selector-head"><div><strong>Seleccionar rubros</strong><span>{selectedCategories.length} de {categories.length} rubros seleccionados · {filteredCategories.length} visibles</span></div><div><button className="link-button" onClick={() => selectVisible(true)}>Marcar visibles</button><button className="link-button" onClick={() => selectVisible(false)}>Desmarcar visibles</button></div></div>
@@ -505,20 +572,11 @@ export function ProductAdmin() {
         <div className="import-summary"><strong>{validRows.length} listas para importar</strong><span>{visiblePreview.filter((item) => item.errors.length > 0).length} con errores en los rubros seleccionados</span></div>
         <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Fila</th><th>SKU</th><th>Artículo</th><th>Medida</th><th>Estado</th></tr></thead><tbody>
           {visiblePreview.slice(0, 250).map((item) => <tr key={item.rowNumber} className={item.errors.length ? "row-error" : ""}><td>{item.rowNumber}</td><td>{item.product.sku}</td><td>{item.product.name}</td><td>{item.product.variants?.length ? `${item.product.variants.length} medidas` : [item.product.diameter, item.product.length].filter(Boolean).join(" × ") || "Simple"}</td><td>{item.errors.join(". ") || item.warnings.join(". ") || "Lista para importar"}</td></tr>)}
-        </tbody></table></div><button className="button" disabled={!validRows.length} onClick={importValid}>Importar {validRows.length} filas válidas</button></> : null}
+        </tbody></table></div><button className="button" disabled={!validRows.length || !cloudReady || workspaceBusy} onClick={importValid}>Preparar {validRows.length} artículos del lote</button></> : null}
     </section>
-
-    {quickPriceProducts.length ? <section className="card admin-card quick-pricing">
-      <div className="admin-heading"><div><span className="eyebrow">Después de importar</span><h2>Carga rápida de precios</h2></div><strong>{quickPriceProducts.filter((item) => item.price > 0).length} de {quickPriceProducts.length} completos</strong></div>
-      <p>Cargá el precio base directamente en la tabla. El precio por transferencia se calcula automáticamente con 10% de descuento.</p>
-      <div className="price-paste"><div><strong>Pegar precios desde Excel</strong><small>Copiá dos columnas sin encabezado: SKU y precio. También reconoce los SKU de las variantes.</small></div><textarea value={pricePaste} onChange={(event) => setPricePaste(event.target.value)} placeholder={'SKU-001\t12500\nSKU-002\t18900'} /><button className="button-muted" disabled={!pricePaste.trim()} onClick={applyPastedPrices}>Aplicar precios por SKU</button></div>
-      <div className="catalog-filters"><label><span>Buscar</span><input value={quickPriceSearch} onChange={(event) => setQuickPriceSearch(event.target.value)} placeholder="Nombre, SKU o categoría" /></label></div>
-      <div className="admin-table-wrap"><table className="admin-table editable-table"><thead><tr><th>SKU</th><th>Artículo</th><th>Categoría</th><th>Precio base</th><th>Transferencia</th><th>Estado</th></tr></thead><tbody>
-        {quickPriceProducts.map((item) => <tr key={item.id} className={item.price <= 0 ? "row-error" : ""}><td>{item.sku}</td><td>{item.name}</td><td>{item.category}</td><td><input className="price-input" type="number" min="0" value={item.price || ""} placeholder="0" onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input className="price-input" type="number" min="0" value={item.transferPrice || ""} onChange={(event) => patchDraft(item.id, { transferPrice: Number(event.target.value) })} /></td><td>{item.price > 0 ? <span className="status-published">Completo</span> : <span className="status-pending">Falta precio</span>}</td></tr>)}
-      </tbody></table></div>
-    </section> : null}
-
+    </>}
     {notice ? <p className="admin-notice">{notice}</p> : null}
+    {module === "ofertas" && <>
     <section className="card admin-card">
       <div className="admin-heading"><div><span className="eyebrow">Portada</span><h2><Star size={24} /> Ofertas destacadas</h2></div><button className="button" disabled={savingOffers || loadingCloud} onClick={saveOffers}><Save size={17} /> {savingOffers ? "Guardando…" : "Guardar ofertas"}</button></div>
       <p>Elegí hasta 4 productos publicados y definí su precio promocional. <strong>{offerProducts.filter((item) => item.featured).length} de 4 seleccionados.</strong></p>
@@ -536,24 +594,269 @@ export function ProductAdmin() {
         {!loadingCloud && !drafts.some((item) => item.published && item.remoteId) ? <p className="no-filter-results">Publicá al menos un producto para poder destacarlo.</p> : null}
       </div>
     </section>
+    </>}
+    {module === "catalogo" && <>
     <section className="card admin-card"><div className="admin-heading"><div><span className="eyebrow">Catálogo</span><h2>{drafts.length} artículos cargados</h2></div>{selectedProductIds.length ? <button className="button-outline bulk-delete" disabled={deletingIds.length > 0} onClick={() => deleteProducts(drafts.filter((item) => selectedProductIds.includes(item.id)))}><Trash2 size={17} /> Eliminar ({selectedProductIds.length})</button> : null}</div>
       <p>{loadingCloud ? "Cargando artículos de Supabase…" : "Acá aparecen tanto los productos guardados en Supabase como los recién importados."}</p>
-      <div className="catalog-filters"><label><span>Buscar</span><input value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Nombre, SKU, marca o categoría" /></label><label><span>Estado</span><select value={catalogStatus} onChange={(event) => setCatalogStatus(event.target.value)}>{["Todos", "Sin precio", "Sin imagen", "Sin publicar", "Sin stock", "Listos"].map((value) => <option key={value}>{value}</option>)}</select></label><button className="link-button clear-filter" onClick={() => { setCatalogSearch(""); setCatalogStatus("Todos"); }}>Limpiar</button></div>
+      <fieldset disabled={workspaceBusy || !cloudReady}>
+      <div className="workspace-toolbar"><label>Buscar<input value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Nombre, SKU o medida" /></label><label>Marca<select value={catalogBrand} onChange={(event) => setCatalogBrand(event.target.value)}><option value="">Todas</option>{[...new Set(drafts.map((item) => item.brand))].sort().map((value) => <option key={value}>{value}</option>)}</select></label><label>Rubro<select value={catalogCategory} onChange={(event) => setCatalogCategory(event.target.value)}><option value="">Todos</option>{[...new Set(drafts.map((item) => item.category))].sort().map((value) => <option key={value}>{value}</option>)}</select></label><label>Estado<select value={catalogStatus} onChange={(event) => setCatalogStatus(event.target.value)}>{["Todos", "Pendientes", "Sin precio", "Sin imagen", "Sin publicar", "Sin stock", "Listos"].map((value) => <option key={value}>{value}</option>)}</select></label><button className="link-button" onClick={() => { setCatalogSearch(""); setCatalogStatus("Todos"); setCatalogBrand(""); setCatalogCategory(""); }}>Limpiar filtros</button><button className="button" disabled={!dirtyDrafts.length || workspaceBusy || !cloudReady} onClick={() => void saveProductBatch(dirtyDrafts)}>Guardar pendientes ({dirtyDrafts.length})</button></div>
+      {selectedProductIds.length > 0 && <div className="workspace-toolbar"><label>Marca para seleccionados<input value={bulkBrand} onChange={(event) => setBulkBrand(event.target.value)} /></label><label>Rubro para seleccionados<input value={bulkCategory} onChange={(event) => setBulkCategory(event.target.value)} /></label><button className="button-outline" disabled={!bulkBrand.trim() && !bulkCategory.trim()} onClick={() => patchSelected({ ...(bulkBrand.trim() ? { brand: bulkBrand.trim() } : {}), ...(bulkCategory.trim() ? { category: bulkCategory.trim() } : {}) })}>Aplicar datos comunes</button><button className="link-button" onClick={() => setSelectedProductIds([])}>Desmarcar todos</button><span>La selección se conserva entre páginas y filtros.</span></div>}
       {selectedProductIds.length ? <div className="bulk-toolbar"><strong>{selectedProductIds.length} seleccionados</strong><button className="button-muted" onClick={() => patchSelected({ published: true })}>Publicar</button><button className="button-muted" onClick={() => patchSelected({ published: false, featured: false })}>Despublicar</button><label>Ajustar <input type="number" value={bulkPercent} onChange={(event) => setBulkPercent(Number(event.target.value))} /> %</label><button className="button-muted" onClick={adjustSelectedPrices}>Aplicar</button><button className="button" disabled={bulkSaving} onClick={saveSelectedProducts}><Save size={16} /> {bulkSaving ? "Guardando…" : "Guardar seleccionados"}</button></div> : null}
+      {dirtyDrafts.length > 0 && <div className="workspace-toolbar"><span>{dirtyDrafts.length} artículos tienen cambios sin guardar.</span><button className="link-button" disabled={workspaceBusy || !cloudReady} onClick={() => void discardPending()}>Descartar todos los pendientes</button></div>}
       <p className="offer-results-count">{filteredDrafts.length} resultados</p>
-      {drafts.length ? <div className="admin-table-wrap"><table className="admin-table editable-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar resultados" checked={filteredDrafts.length > 0 && filteredDrafts.every((item) => selectedProductIds.includes(item.id))} onChange={(event) => setSelectedProductIds((current) => event.target.checked ? [...new Set([...current, ...filteredDrafts.map((item) => item.id)])] : current.filter((id) => !filteredDrafts.some((item) => item.id === id)))} /></th><th>Foto</th><th>SKU</th><th>Artículo</th><th>Marca</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Publicar</th><th></th></tr></thead><tbody>
-        {filteredDrafts.map((item) => { const images = [...new Set([...(item.images ?? []), item.image].filter(Boolean))]; return <tr key={item.id}><td><input type="checkbox" aria-label={`Seleccionar ${item.name}`} checked={selectedProductIds.includes(item.id)} onChange={() => toggleProductSelection(item.id)} /></td><td><img className="admin-product-thumb" src={images[0] || "/imagenes/producto-sin-foto.svg"} alt="" /></td><td>{item.sku}</td><td className="editable-name"><input className="title-input" value={item.name} aria-label={`Título de ${item.sku}`} onChange={(event) => patchDraft(item.id, { name: event.target.value })} /></td><td><input value={item.brand} onChange={(event) => patchDraft(item.id, { brand: event.target.value })} /></td><td><input value={item.category} onChange={(event) => patchDraft(item.id, { category: event.target.value })} /></td><td><input className="price-input" type="number" min="0" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input className="stock-input" type="number" min="0" value={item.stock} disabled={Boolean(item.variants?.length)} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></td><td><input type="checkbox" checked={item.published} onChange={(event) => patchDraft(item.id, { published: event.target.checked })} /></td><td><div className="table-actions"><button className="icon-button" onClick={() => setEditingId(editingId === item.id ? null : item.id)} aria-label="Editar"><Pencil size={17} /></button><button className="icon-button danger" disabled={deletingIds.includes(item.id)} onClick={() => deleteProduct(item)} aria-label="Eliminar producto"><Trash2 size={17} /></button></div></td></tr>})}
+      {drafts.length ? <div className="admin-table-wrap"><table className="admin-table editable-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar esta página" checked={visibleDrafts.length > 0 && visibleDrafts.every((item) => selectedProductIds.includes(item.id))} onChange={(event) => setSelectedProductIds((current) => event.target.checked ? [...new Set([...current, ...visibleDrafts.map((item) => item.id)])] : current.filter((id) => !visibleDrafts.some((item) => item.id === id)))} /></th><th>Foto</th><th>SKU</th><th>Artículo</th><th>Marca</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Publicar</th><th></th></tr></thead><tbody>
+        {visibleDrafts.map((item) => { const images = [...new Set([...(item.images ?? []), item.image].filter(Boolean))]; return <tr key={item.id}><td><input type="checkbox" aria-label={`Seleccionar ${item.name}`} checked={selectedProductIds.includes(item.id)} onChange={() => toggleProductSelection(item.id)} /></td><td><img className="admin-product-thumb" src={images[0] || "/imagenes/producto-sin-foto.svg"} alt="" /></td><td>{item.sku}{(item.dirty || !item.remoteId) && <small className="pending-product-label">Sin guardar</small>}</td><td className="editable-name"><input className="title-input" value={item.name} aria-label={`Título de ${item.sku}`} onChange={(event) => patchDraft(item.id, { name: event.target.value })} /></td><td><input value={item.brand} onChange={(event) => patchDraft(item.id, { brand: event.target.value })} /></td><td><input value={item.category} onChange={(event) => patchDraft(item.id, { category: event.target.value })} /></td><td><input className="price-input" type="number" min="0" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input className="stock-input" type="number" min="0" value={item.stock} disabled={Boolean(item.variants?.length)} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></td><td><input type="checkbox" checked={item.published} onChange={(event) => patchDraft(item.id, { published: event.target.checked })} /></td><td><div className="table-actions"><button className="icon-button" disabled={workspaceBusy || !cloudReady || (!item.dirty && Boolean(item.remoteId))} onClick={() => void saveToSupabase(item)} aria-label={`Guardar ${item.sku}`}><Save size={17} /></button><button className="icon-button" onClick={() => setEditingId(editingId === item.id ? null : item.id)} aria-label="Editar"><Pencil size={17} /></button><button className="icon-button danger" disabled={deletingIds.includes(item.id)} onClick={() => deleteProduct(item)} aria-label="Eliminar producto"><Trash2 size={17} /></button></div></td></tr>})}
       </tbody></table></div> : <p>Todavía no hay borradores.</p>}
-      {editingId && drafts.find((draft) => draft.id === editingId) ? (() => { const item = drafts.find((draft) => draft.id === editingId)!; const images = [...new Set([...(item.images ?? []), item.image, imageUrl.trim()].filter(Boolean))]; const publishPriceReady = item.variants?.length ? item.variants.every((variant) => variant.price > 0) : item.price > 0; const hasPitch = Boolean(item.variants?.some((variant) => variant.pitch)); return <div className="product-editor-backdrop" onMouseDown={() => setEditingId(null)}><div className="product-editor" role="dialog" aria-modal="true" aria-label={`Editar ${item.name}`} onMouseDown={(event) => event.stopPropagation()}>
+      <div className="workspace-pagination"><button className="button-outline" disabled={currentCatalogPage === 0} onClick={() => setCatalogPage(currentCatalogPage - 1)}>Anterior</button><span>{filteredDrafts.length} resultados · Página {currentCatalogPage + 1} de {catalogPages}</span><button className="button-outline" disabled={currentCatalogPage + 1 >= catalogPages} onClick={() => setCatalogPage(currentCatalogPage + 1)}>Siguiente</button><label>Por página<select value={catalogPageSize} onChange={(event) => setCatalogPageSize(Number(event.target.value))}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label></div>
+      {editingId && drafts.find((draft) => draft.id === editingId) ? (() => {
+        const item = drafts.find((draft) => draft.id === editingId)!;
+        const images = [...new Set([...(item.images ?? []), item.image, imageUrl.trim()].filter(Boolean))];
+        const uniqueDiameters = item.variants?.length ? [...new Set(item.variants.map((v) => v.diameter).filter(Boolean))] : [];
+        const pricedVariantsCount = item.variants?.filter((v) => v.price > 0).length ?? 0;
+        const totalVariantsCount = item.variants?.length ?? 0;
+        const allVariantsPriced = totalVariantsCount > 0 && pricedVariantsCount === totalVariantsCount;
+        const hasBasePrice = item.price > 0;
+        const publishPriceReady = totalVariantsCount > 0 ? (allVariantsPriced || hasBasePrice || pricedVariantsCount > 0) : hasBasePrice;
+        const hasPitch = Boolean(item.variants?.some((variant) => variant.pitch));
+
+        return <div className="product-editor-backdrop" onMouseDown={() => setEditingId(null)}><div className="product-editor" role="dialog" aria-modal="true" aria-label={`Editar ${item.name}`} onMouseDown={(event) => event.stopPropagation()}>
         <div className="editor-head"><div><span className="eyebrow">Editar producto</span><h3>{item.name}</h3></div><button className="icon-button" onClick={() => setEditingId(null)} aria-label="Cerrar"><X size={18} /></button></div>
         <div className="product-form compact-form"><label className="wide">Título del artículo<input required value={item.name} onChange={(event) => patchDraft(item.id, { name: event.target.value })} /></label><label>Precio base {item.variants?.length ? "(opcional)" : ""}<input min="1" type="number" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></label><label>Transferencia base<input min="1" type="number" value={item.transferPrice || ""} onChange={(event) => patchDraft(item.id, { transferPrice: Number(event.target.value) })} /></label><label>Stock total<input min="0" type="number" disabled={Boolean(item.variants?.length)} value={item.stock} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></label><label>Etiqueta<input value={item.badge} onChange={(event) => patchDraft(item.id, { badge: event.target.value })} /></label></div>
-        {item.variants?.length ? <div className="variant-editor"><div><h4>Medidas y stock</h4><p>Si una medida no tiene precio propio, se usa el precio base.</p></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Diámetro</th><th>{hasPitch ? "Paso" : "Largo"}</th><th>SKU</th><th>Stock</th><th>Precio</th><th>Transferencia</th></tr></thead><tbody>{item.variants.map((variant, index) => <tr key={variant.sku}><td>{variant.diameter}</td><td>{hasPitch ? variant.pitch : variant.length}</td><td>{variant.sku}</td><td><input type="number" min="0" value={variant.stock} onChange={(event) => updateVariant(item, index, { stock: Number(event.target.value) })} /></td><td><input type="number" min="0" value={variant.price || ""} placeholder={String(item.price || "Base")} onChange={(event) => { const price = Number(event.target.value); updateVariant(item, index, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input type="number" min="0" value={variant.transferPrice || ""} placeholder={String(item.transferPrice || "Base")} onChange={(event) => updateVariant(item, index, { transferPrice: Number(event.target.value) })} /></td></tr>)}</tbody></table></div></div> : null}
+        <div className="workspace-toolbar"><button className="button-outline" disabled={savingIds.includes(item.id)} onClick={() => addVariant(item)}>+ Agregar medida</button></div>
+        {item.variants?.length ? <div className="variant-editor">
+          <div className="variant-editor-header">
+            <div>
+              <h4>Medidas y stock</h4>
+              <p>Cada medida tiene su SKU propio para asociar precios.</p>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <span className={`variant-badge-count ${allVariantsPriced ? "complete" : "pending"}`}>
+                {allVariantsPriced ? <Check size={14} /> : null}
+                {pricedVariantsCount} de {totalVariantsCount} medidas con precio
+              </span>
+            </div>
+          </div>
+
+          <div className="variant-tools-bar">
+            <label className="tool-btn-sm" title="Subir Excel o CSV con SKU y Precio para este producto">
+              <FileUp size={15} /> Subir Excel/CSV
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleModalFilePrices(e, item)} />
+            </label>
+
+            <button
+              type="button"
+              className={`tool-btn-sm ${modalTool === "paste" ? "active" : ""}`}
+              onClick={() => setModalTool(modalTool === "paste" ? null : "paste")}
+              title="Pegar columnas copiadas desde Excel"
+            >
+              <ClipboardList size={15} /> Pegar desde Excel
+            </button>
+
+            {uniqueDiameters.length ? (
+              <button
+                type="button"
+                className={`tool-btn-sm ${modalTool === "diameter" ? "active" : ""}`}
+                onClick={() => {
+                  if (!modalTargetDiameter && uniqueDiameters[0]) setModalTargetDiameter(uniqueDiameters[0]);
+                  setModalTool(modalTool === "diameter" ? null : "diameter");
+                }}
+                title="Asignar precio por diámetro"
+              >
+                <Layers size={15} /> Por Diámetro
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              className="tool-btn-sm"
+              onClick={() => handleModalCopyBasePrice(item)}
+              title="Completar precio base en las medidas vacías"
+            >
+              <Check size={15} /> Usar precio base en vacías
+            </button>
+
+            <button
+              type="button"
+              className={`tool-btn-sm ${modalTool === "percent" ? "active" : ""}`}
+              onClick={() => setModalTool(modalTool === "percent" ? null : "percent")}
+              title="Ajustar porcentaje a las medidas"
+            >
+              <Percent size={15} /> Ajustar %
+            </button>
+
+            <button
+              type="button"
+              className="tool-btn-sm"
+              onClick={() => downloadProductMeasureTemplate(item)}
+              title="Descargar listado CSV de medidas de este producto"
+            >
+              <Download size={15} /> Descargar medidas CSV
+            </button>
+          </div>
+
+          {modalTool === "paste" ? (
+            <div className="variant-panel-box">
+              <h5>Pegar precios desde Excel</h5>
+              <p>Podés pegar dos columnas (SKU y Precio) o solo la columna de precios en el orden de la tabla.</p>
+              <textarea
+                className="variant-panel-textarea"
+                value={modalPricePaste}
+                onChange={(e) => setModalPricePaste(e.target.value)}
+                placeholder={'Opción A (SKU y Precio):\n1215021109627\t2500\n1215021109628\t2800\n\nOpción B (solo precios correlativos):\n2500\n2800\n3100'}
+              />
+              <div className="variant-panel-row">
+                <button type="button" className="button" disabled={!modalPricePaste.trim()} onClick={() => handleModalPastePrices(item)}>
+                  Aplicar precios
+                </button>
+                <button type="button" className="button-outline" onClick={() => setModalTool(null)}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {modalTool === "diameter" ? (
+            <div className="variant-panel-box">
+              <h5>Asignar precio por diámetro</h5>
+              <p>Aplica el mismo valor a todas las medidas que compartan este diámetro.</p>
+              <div className="variant-panel-row">
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  Diámetro:
+                  <select value={modalTargetDiameter} onChange={(e) => setModalTargetDiameter(e.target.value)}>
+                    {uniqueDiameters.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  Precio: $
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Ej: 3500"
+                    value={modalDiameterPrice}
+                    onChange={(e) => setModalDiameterPrice(e.target.value)}
+                  />
+                </label>
+                <button type="button" className="button" disabled={!modalDiameterPrice} onClick={() => handleModalDiameterPrice(item)}>
+                  Asignar a medidas de {modalTargetDiameter}
+                </button>
+                <button type="button" className="button-outline" onClick={() => setModalTool(null)}>
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {modalTool === "percent" ? (
+            <div className="variant-panel-box">
+              <h5>Ajustar porcentaje a todas las medidas</h5>
+              <p>Modifica proporcionalmente los precios existentes de este producto.</p>
+              <div className="variant-panel-row">
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  Porcentaje:
+                  <input
+                    type="number"
+                    value={modalVariantPercent}
+                    onChange={(e) => setModalVariantPercent(Number(e.target.value))}
+                    style={{ width: "80px" }}
+                  /> %
+                </label>
+                <button type="button" className="button" onClick={() => handleModalAdjustPercent(item)}>
+                  Aplicar {modalVariantPercent}%
+                </button>
+                <button type="button" className="button-outline" onClick={() => setModalTool(null)}>
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Diámetro</th>
+                  <th>{hasPitch ? "Paso" : "Largo"}</th>
+                  <th>SKU</th>
+                  <th>Stock</th>
+                  <th>Precio</th>
+                  <th>Transferencia</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {item.variants.map((variant, index) => {
+                  const hasPrice = variant.price > 0;
+                  return (
+                    <tr key={variant.id || index} className={!hasPrice ? "row-pending-price" : ""}>
+                      <td><input aria-label={`Diámetro medida ${index + 1}`} value={variant.diameter} onChange={(event) => updateVariant(item, index, { diameter: event.target.value })} /></td>
+                      <td><input aria-label={`${hasPitch ? "Paso" : "Largo"} medida ${index + 1}`} value={(hasPitch ? variant.pitch : variant.length) || ""} onChange={(event) => updateVariant(item, index, hasPitch ? { pitch: event.target.value } : { length: event.target.value })} /></td>
+                      <td><input aria-label={`SKU medida ${index + 1}`} value={variant.sku} onChange={(event) => updateVariant(item, index, { sku: event.target.value })} /></td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          aria-label={`Stock medida ${index + 1}`}
+                          value={variant.stock}
+                          onChange={(event) => updateVariant(item, index, { stock: Number(event.target.value) })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          aria-label={`Precio medida ${index + 1}`}
+                          value={variant.price || ""}
+                          placeholder={String(item.price || "Base")}
+                          style={!hasPrice ? { borderColor: "#7a581e" } : undefined}
+                          onChange={(event) => {
+                            const price = Number(event.target.value);
+                            updateVariant(item, index, { price, transferPrice: transferFromPrice(price) });
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          aria-label={`Transferencia medida ${index + 1}`}
+                          value={variant.transferPrice || ""}
+                          placeholder={String(item.transferPrice || "Base")}
+                          onChange={(event) => updateVariant(item, index, { transferPrice: Number(event.target.value) })}
+                        />
+                      </td>
+                      <td><button className="icon-button danger" aria-label={`Quitar medida ${index + 1}`} onClick={() => { const variants = item.variants!.filter((_, position) => position !== index); patchDraft(item.id, { variants: variants.length ? variants : undefined, stock: variants.length ? variants.reduce((total, variant) => total + variant.stock, 0) : item.stock }); }}><Trash2 size={16} /></button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div> : null}
         <div className="photo-manager"><div className="photo-manager-title"><div><h4>Fotos del producto</h4><p>La primera es la portada. Podés guardar hasta 6.</p></div><label className="button-outline photo-upload"><ImagePlus size={17} /> Subir fotos<input type="file" accept="image/*" multiple onChange={(event) => addImageFiles(item, event.target.files)} /></label></div><div className="image-url-row"><input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addImageUrl(item); } }} placeholder="https://... URL de una imagen" /><button className="button-muted" onClick={() => addImageUrl(item)}>Agregar URL</button></div>
           {images.length ? <div className="photo-grid">{images.map((url, index) => <div className="photo-item" key={url}><img src={url} alt={`${item.name} ${index + 1}`} /><span>{index === 0 ? "Portada" : `Foto ${index + 1}`}</span><button onClick={() => removeImage(item, url)} aria-label="Quitar foto"><X size={15} /></button></div>)}</div> : <div className="empty-photos">Todavía no hay fotos. El producto no se podrá publicar hasta agregar una.</div>}
         </div>
         {notice ? <p className="editor-result">{notice}</p> : null}
-        <div className="editor-save"><div><label className="check-field"><input type="checkbox" checked={item.published} onChange={(event) => patchDraft(item.id, { published: event.target.checked })} /> Publicar en la tienda al guardar</label>{item.published && (!publishPriceReady || !images.length) ? <small>Antes de guardar para publicación, {item.variants?.length ? "completá el precio de todas las medidas" : "completá el precio"} y agregá una foto.</small> : null}</div><button className="button" disabled={savingIds.includes(item.id)} onClick={() => saveToSupabase(item)}><Save size={18} /> {savingIds.includes(item.id) ? "Guardando…" : "Guardar producto"}</button></div>
+        <div className="editor-save">
+          <div>
+            <label className="check-field">
+              <input type="checkbox" checked={item.published} onChange={(event) => patchDraft(item.id, { published: event.target.checked })} /> Publicar en la tienda al guardar
+            </label>
+            {item.published && (!publishPriceReady || !images.length) ? (
+              <small style={{ color: "#f2c96d" }}>Antes de guardar para publicación, agregá al menos un precio y una foto.</small>
+            ) : null}
+            {item.published && !allVariantsPriced && totalVariantsCount > 0 ? (
+              <small style={{ color: "#a3a3a3" }}>Las medidas sin precio propio usarán el precio base al publicarse.</small>
+            ) : null}
+          </div>
+          <button className="button" disabled={savingIds.includes(item.id)} onClick={() => saveToSupabase(item)}>
+            <Save size={18} /> {savingIds.includes(item.id) ? "Guardando…" : "Guardar producto"}
+          </button>
+        </div>
       </div></div>; })() : null}
+      </fieldset>
     </section>
+    </>}
   </div>;
 }

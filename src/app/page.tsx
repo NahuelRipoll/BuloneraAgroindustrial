@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { StorefrontCarousel } from "@/components/storefront-carousel";
 import {
   CheckCircle2,
   ClipboardList,
@@ -150,14 +151,7 @@ export default async function Home() {
 
         <section id="nosotros" className="section alt">
           <div className="container grid grid-2" style={{ alignItems: "center" }}>
-            <div className="media-card storefront-card">
-              <img className="storefront-photo" src="/imagenes/portada-local.jpeg" alt="Frente del local de Bulonera Agroindustrial" />
-              <div className="stats">
-                <div className="stat"><strong>3+</strong><span>años</span></div>
-                <div className="stat"><strong>Gran</strong><span>variedad de stock</span></div>
-                <div className="stat schedule-stat"><strong>HORARIO</strong><span>8:00–13:00<br />15:00–19:30</span></div>
-              </div>
-            </div>
+            <StorefrontCarousel />
             <div>
               <span className="eyebrow">Quiénes somos</span>
               <h2>Atención de mostrador con criterio técnico</h2>

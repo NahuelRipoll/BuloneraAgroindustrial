@@ -5,6 +5,7 @@ export const productStorageKey = "bulonera-product-drafts";
 export type LocalProductDraft = {
   id: string;
   remoteId?: string;
+  dirty?: boolean;
   savedPublished?: boolean;
   savedFeatured?: boolean;
   slug: string;

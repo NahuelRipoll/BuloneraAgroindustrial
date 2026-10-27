@@ -11,6 +11,16 @@ export default function AdminPage() {
     <div className="admin-title"><span className="eyebrow">Administración</span><h1>Panel general</h1><p>Gestioná el catálogo y el contenido comercial de la tienda desde un solo lugar.</p></div>
     <AdminAuthGate>
       <section className="admin-dashboard-grid">
+        <Link className="admin-module-card" href="/admin/respaldos">
+          <div className="admin-module-icon"><Package size={30} /></div>
+          <div><span className="eyebrow">Protección de datos</span><h2>Respaldos</h2><p>Descargá copias del catálogo y recuperá productos, variantes y fotos.</p></div>
+          <ChevronRight className="admin-module-arrow" />
+        </Link>
+        <Link className="admin-module-card" href="/admin/nosotros">
+          <div className="admin-module-icon"><Store size={30} /></div>
+          <div><span className="eyebrow">Sitio web</span><h2>Fotos de Nosotros</h2><p>Subí, reemplazá y ordená las fotos del carrusel del local.</p></div>
+          <ChevronRight className="admin-module-arrow" />
+        </Link>
         <Link className="admin-module-card" href="/admin/productos">
           <div className="admin-module-icon"><Package size={30} /></div>
           <div><span className="eyebrow">Catálogo</span><h2>Productos</h2><p>Cargá artículos, actualizá precios y stock, administrá imágenes, variantes y publicaciones.</p><div className="admin-module-tags"><span><Store size={14} /> Tienda</span><span><Star size={14} /> Ofertas</span></div></div>

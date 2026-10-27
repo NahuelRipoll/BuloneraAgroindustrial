@@ -3,6 +3,7 @@ node_modules/
 
 # Next.js output
 .next/
+/public/pdf.worker.min.mjs
 out/
 .vercel/
 
@@ -35,4 +36,5 @@ Desktop.ini
 *.sqlite3
 *.db
 backups/
+data/convertidos/
 

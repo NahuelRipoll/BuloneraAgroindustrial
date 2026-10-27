@@ -4,6 +4,7 @@ import { CheckCircle2, CircleDot, Ruler, ShieldCheck, Wrench } from "lucide-reac
 import { CartDrawer } from "@/components/cart-drawer";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
+import { AdviceIndex } from "@/components/advice-index";
 
 export const metadata: Metadata = { title: "Biblioteca técnica | Bulonera Agroindustrial", description: "Equivalencias de medidas, roscas y grados de resistencia para elegir bulonería correctamente." };
 
@@ -11,9 +12,9 @@ const inchSizes = [["1/8", "3,18"], ["3/16", "4,76"], ["1/4", "6,35"], ["5/16", 
 const metricWrenches = [["M4", "7"], ["M5", "8"], ["M6", "10"], ["M8", "13"], ["M10", "17"], ["M12", "19"], ["M14", "22"], ["M16", "24"], ["M18", "27"], ["M20", "30"], ["M22", "32"], ["M24", "36"]];
 
 export default function AdvicePage() {
-  return <><Header /><CartDrawer /><main>
+  return <><Header /><CartDrawer /><main className="advice-page">
     <section className="advice-hero"><div className="container"><span className="eyebrow">Centro de asesoramiento</span><h1>Biblioteca técnica</h1><p>Referencias rápidas para medir, comparar y comprar fijaciones con menos margen de error.</p></div></section>
-    <nav className="advice-index"><div className="container"><a href="#equivalencias">Pulgadas a mm</a><a href="#medicion">Cómo medir</a><a href="#roscas">Roscas</a><a href="#resistencia">Resistencia</a><a href="#checklist">Antes de comprar</a></div></nav>
+    <AdviceIndex />
 
     <section id="equivalencias" className="section"><div className="container"><div className="section-head"><div><span className="eyebrow">Conversión rápida</span><h2><Ruler size={28} /> Pulgadas a milímetros</h2></div></div><div className="technical-grid"><div className="card"><table className="table technical-table"><thead><tr><th>Pulgadas</th><th>Milímetros</th></tr></thead><tbody>{inchSizes.map(([inch, mm]) => <tr key={inch}><td>{inch}&quot;</td><td>{mm} mm</td></tr>)}</tbody></table></div><article className="card technical-note"><h3>Regla de conversión</h3><strong>1 pulgada = 25,4 mm</strong><p>La equivalencia dimensional no significa que una rosca métrica y una rosca en pulgadas sean intercambiables. También deben coincidir el paso y el perfil de la rosca.</p><div className="formula">pulgadas × 25,4 = milímetros</div></article></div></div></section>
 
