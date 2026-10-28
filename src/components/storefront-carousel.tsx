@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { defaultStorefrontImages, loadStorefrontImages } from "@/lib/storefront-gallery";
+import { framingStyle } from "@/lib/storefront-framing";
 
 export function StorefrontCarousel() {
   const [images, setImages] = useState(defaultStorefrontImages);
@@ -26,7 +27,7 @@ export function StorefrontCarousel() {
   }, [images.length, paused, hovered, focused, reduced]);
   const move = (offset: number) => { setPaused(true); setIndex((value) => (value + offset + images.length) % images.length); };
   return <div className="media-card storefront-card" role="region" aria-roledescription="carrusel" aria-label="Fotos de nuestro local" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocusCapture={() => setFocused(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}>
-    <img className="storefront-photo" src={images[index].src} alt={images[index].alt} />
+    <img className="storefront-photo" src={images[index].src} alt={images[index].alt} style={framingStyle(images[index])} />
     {images.length > 1 && <>
       <button className="gallery-arrow previous" aria-label="Foto anterior" onClick={() => move(-1)}><ChevronLeft /></button>
       <button className="gallery-arrow next" aria-label="Foto siguiente" onClick={() => move(1)}><ChevronRight /></button>

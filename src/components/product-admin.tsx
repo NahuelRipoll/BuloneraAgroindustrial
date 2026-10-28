@@ -10,6 +10,7 @@ import { usePathname } from "next/navigation";
 import { productModules } from "@/lib/admin-product-modules";
 import { ProductQuickEntry } from "@/components/product-quick-entry";
 import { ProductPriceManager } from "@/components/product-price-manager";
+import { ProductPhotoManager } from "@/components/product-photo-manager";
 import { loadAdminCatalog, mergeAdminDrafts } from "@/lib/admin-catalog";
 import { applyPriceChanges, buildPricePreview, percentageInputs } from "@/lib/admin-price-preview";
 
@@ -474,11 +475,11 @@ export function ProductAdmin() {
     setNotice(`${saved} productos guardados.${saved < selected.length ? ` ${selected.length - saved} no se guardaron; abrí uno y guardalo para revisar el error.` : ""}`);
   }
 
-  async function saveProductBatch(items: DraftProduct[], progress: (message: string) => void = setNotice) {
+  async function saveProductBatch(items: DraftProduct[], progress: (message: string) => void = setNotice, stageDrafts = true) {
     if (bulkSaving || !cloudReady) return [];
     setBulkSaving(true);
     const updates = new Map(items.map((item) => [item.id, item]));
-    setDrafts((current) => current.map((item) => updates.has(item.id) ? { ...updates.get(item.id)!, dirty: true } : item));
+    if (stageDrafts) setDrafts((current) => current.map((item) => updates.has(item.id) ? { ...updates.get(item.id)!, dirty: true } : item));
     const saved: string[] = [];
     try {
       for (const [index, item] of items.entries()) {
@@ -549,6 +550,7 @@ export function ProductAdmin() {
     {!activeModule && <div className="product-module-grid">{productModules.map((item, index) => <Link className="product-module-card" key={item.id} href={`/admin/productos/${item.id}`}><span className="module-number">0{index + 1}</span><h2>{item.title}</h2><p>{item.description}</p><strong>{item.action} →</strong></Link>)}</div>}
     <div hidden={module !== "carga"}><ProductQuickEntry products={drafts} disabled={!cloudReady || workspaceBusy} onCreate={addQuickProducts} /></div>
     <div hidden={module !== "precios"}><ProductPriceManager products={drafts} disabled={!cloudReady || bulkSaving || savingOffers} onSave={saveProductBatch} onBusyChange={setChildBusy} /></div>
+    <div hidden={module !== "fotos"}><ProductPhotoManager products={drafts} disabled={!cloudReady || bulkSaving || savingOffers} onSave={(items, progress) => saveProductBatch(items, progress, false)} onBusyChange={setChildBusy} /></div>
     {(module === "carga" || module === "importar") && pendingCloudSaveIds.length > 0 && <div className="workspace-savebar"><span><strong>{pendingCloudSaveIds.length}</strong> artículos del lote pendientes de guardar. También podés completarlos desde Catálogo.</span><button className="button" disabled={workspaceBusy || !cloudReady} onClick={() => void saveProductBatch(drafts.filter((item) => pendingCloudSaveIds.includes(item.id)))}>Guardar lote pendiente</button></div>}
     {module === "importar" && <>
     <section className="card admin-card">

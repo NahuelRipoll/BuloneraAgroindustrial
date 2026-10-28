@@ -27,6 +27,20 @@ La tabla muestra precio actual, nuevo, diferencia y página del PDF. Se pueden c
 
 Guardar afecta únicamente los productos seleccionados. Si una parte del lote falla, los artículos fallidos siguen seleccionados para reintentar. Transferencia se calcula con 10% de descuento. Una edición posterior incompatible con la vista previa bloquea el guardado y pide regenerarla.
 
+## Fotos por código
+
+Abrir `/admin/productos/fotos` y seleccionar varias imágenes JPG, PNG o WebP. Se admiten hasta 60 archivos por lote, 12 MB por foto y 120 MB en total. No se sube nada hasta presionar **Guardar fotos seleccionadas**.
+
+- `001342-1.jpg`, `001342-2.jpg`: código y orden de la foto. Se conservan ceros iniciales y se ignoran mayúsculas/minúsculas al comparar códigos.
+- `GRP-ABC123-1.jpg`: galería del producto agrupado. Un código de medida también apunta a la galería de su producto, compartida entre todas sus medidas; no crea fotografías exclusivas de una variante.
+- `001342.jpg`: orden 1. Si el nombre sin extensión coincide exactamente con un SKU completo (por ejemplo `ABC-1`), se prioriza ese SKU; para su segunda foto usar `ABC-1-2.jpg`.
+
+La revisión muestra archivo, miniatura, código destino, orden y artículo asociado. Los archivos sin coincidencia o inválidos quedan desmarcados; se puede corregir el código, seleccionar la fila o quitarla. Los códigos ambiguos, órdenes inválidos o repetidos para el mismo producto y galerías de más de seis fotos bloquean el guardado mientras estén seleccionados.
+
+Las fotos nuevas se ordenan de menor a mayor y van antes de las existentes: la primera nueva será la portada. Las existentes se conservan después, sin borrar archivos. La vista previa muestra la galería resultante. Para quitar fotos existentes, usar el editor de Catálogo. Solo se usan artículos guardados, también sin publicar o sin stock; este módulo no crea productos ni los publica.
+
+Se optimizan las imágenes y se utiliza el guardado transaccional existente por producto. Si falla un artículo, sus archivos siguen en revisión para reintentar y los ya guardados se quitan del lote. Una subida fallida puede dejar un archivo sin referencias en Storage, sin modificar la galería del producto. Los archivos seleccionados se conservan al navegar entre módulos; recargar la página requiere seleccionarlos nuevamente. Este paso admite selección múltiple de archivos, sin ZIP.
+
 ## Catálogo y ofertas
 
 El catálogo carga todas las páginas de Supabase, no solo las primeras 1000 filas. La grilla tiene búsqueda por nombre/SKU/medida, filtros por marca/rubro/estado, páginas de 25/50/100, guardado individual y de pendientes. La selección persiste entre páginas: se pueden actualizar datos comunes, publicación, precios o eliminar en lote. El editor permite agregar, quitar y editar medidas, códigos, stock, precios y fotos.
@@ -43,6 +57,6 @@ npm run test:ui
 node tools/check-price-pdf.mjs "data/Listado de precios.pdf"
 ```
 
-Las pruebas de navegador requieren la URL pública de Supabase utilizada al compilar (desde `.env.local` o variable de entorno). Interceptan Auth y REST con cuentas y catálogo simulados: no escriben en Supabase. El caso PDF usa el archivo comercial local cuando está disponible; no se incorpora ese PDF al repositorio. El worker de PDF.js se copia automáticamente en postinstall, predev y prebuild para mantener la versión sincronizada y no depender de un CDN.
+Las pruebas de navegador requieren la URL pública de Supabase utilizada al compilar (desde `.env.local` o variable de entorno). Interceptan Auth, REST y Storage con cuentas y catálogo simulados: no escriben en Supabase. Los casos de fotos comprueban corrección de coincidencias, galerías compartidas, portada, conservación de fotos existentes, bloqueo de órdenes repetidos, reintento del artículo fallido e imágenes ilegibles sin guardado parcial. El caso PDF usa el archivo comercial local cuando está disponible; no se incorpora ese PDF al repositorio. El worker de PDF.js se copia automáticamente en postinstall, predev y prebuild para mantener la versión sincronizada y no depender de un CDN.
 
 No hay una migración SQL nueva en esta reorganización. Se requiere la migración de permisos y respaldos ya instalada, que proporciona `save_catalog_product`.

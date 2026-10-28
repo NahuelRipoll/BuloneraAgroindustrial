@@ -49,6 +49,8 @@ creará una plantilla propia de actualización por SKU.
 
 ## 3. Fotografías mediante carpeta o ZIP
 
+**Implementado el 28/10/2026:** selección múltiple de JPG/PNG/WebP en **Productos → Fotos**, coincidencias por código de producto o medida, corrección manual, revisión de galerías y guardado explícito. Las medidas usan la galería compartida de su producto. Las fotos nuevas van antes de las existentes y el total no puede superar seis por producto. La carga de carpetas y ZIP sigue pendiente. Detalles y límites en [product-admin-modules.md](product-admin-modules.md#fotos-por-código).
+
 Las imágenes podrán relacionarse automáticamente mediante el nombre del archivo.
 
 Para artículos simples o variantes específicas:

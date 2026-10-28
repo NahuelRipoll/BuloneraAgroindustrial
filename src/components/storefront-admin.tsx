@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 import { loadStorefrontImages, storefrontClient, type StorefrontImage } from "@/lib/storefront-gallery";
+import { StorefrontPhotoFramer } from "@/components/storefront-photo-framer";
 
 async function uploadPhoto(file: File) {
   if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Elegí una imagen JPG, PNG o WebP.");
@@ -42,7 +43,7 @@ export function StorefrontAdmin() {
     try {
       const uploaded: StorefrontImage[] = [];
       for (const file of files) uploaded.push({ id: crypto.randomUUID(), src: await uploadPhoto(file), alt: "Local de Bulonera Agroindustrial" });
-      change(replaceId ? images.map((image) => image.id === replaceId ? { ...image, src: uploaded[0].src } : image) : [...images, ...uploaded]);
+      change(replaceId ? images.map((image) => image.id === replaceId ? { ...image, src: uploaded[0].src, position: undefined, zoom: undefined } : image) : [...images, ...uploaded]);
     } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudieron subir las fotos."); }
     finally { setBusy(false); }
   }
@@ -65,7 +66,7 @@ export function StorefrontAdmin() {
     <fieldset disabled={!ready || busy}>
       <label className="button-outline gallery-upload">Subir fotos<input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { void add(Array.from(event.target.files ?? [])); event.target.value = ""; }} /></label>
       <div className="gallery-editor-grid">{images.map((image, index) => <article className="gallery-editor-photo" key={image.id}>
-        <img src={image.src} alt={image.alt} />
+        <StorefrontPhotoFramer image={image} number={index + 1} disabled={!ready || busy} onChange={(frame) => change(images.map((item) => item.id === image.id ? { ...item, ...frame } : item))} />
         <label>Descripción de la foto {index + 1}<input maxLength={200} value={image.alt} onChange={(event) => change(images.map((item) => item.id === image.id ? { ...item, alt: event.target.value } : item))} /></label>
         <div className="gallery-editor-actions">
           <button className="button-muted" disabled={index === 0} aria-label={`Mover foto ${index + 1} antes`} onClick={() => move(index, -1)}>←</button>

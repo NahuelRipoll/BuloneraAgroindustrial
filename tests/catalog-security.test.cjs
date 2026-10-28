@@ -155,10 +155,12 @@ test('cambiar un SKU mantiene la identidad; importar el SKU existente no duplica
 
 test('editar la galería conserva un respaldo completo previo sin dar acceso a usuarios comunes', async () => {
   await as('authenticated', adminEmail);
-  await db.query("insert into public.storefront_gallery(id, images) values (true, '[{\"id\":\"old\",\"src\":\"/vieja.jpg\",\"alt\":\"Anterior\"}]')");
+  await db.query('insert into public.storefront_gallery(id, images) values (true, $1::jsonb)', [JSON.stringify([{ id: 'old', src: '/vieja.jpg', alt: 'Anterior', position: { x: 20, y: 75 }, zoom: 2 }])]);
   await db.query("update public.storefront_gallery set images = '[]'");
   const snapshot = await scalar("select snapshot from public.catalog_backups where label = 'Antes de editar fotos de Nosotros' order by created_at desc limit 1");
   assert.equal(snapshot.gallery[0].images[0].alt, 'Anterior');
+  assert.deepEqual(snapshot.gallery[0].images[0].position, { x: 20, y: 75 });
+  assert.equal(snapshot.gallery[0].images[0].zoom, 2);
   await as('authenticated', 'cliente@example.com');
   assert.equal(await scalar('select count(*) from public.catalog_backups'), 0);
 });

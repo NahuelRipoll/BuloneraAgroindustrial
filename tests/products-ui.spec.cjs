@@ -13,10 +13,14 @@ const fixture = () => [
   { id: secondId, slug: 'bulones', name: 'Bulón hexagonal', sku: 'GRP-BULON', brand: 'Marca', category: 'Bulones', price: 200, transfer_price: 180, stock: 10, badge: null, published: false, featured: false, specs: {}, product_images: [], product_variants: [{ id: '33333333-3333-4333-8333-333333333333', sku: '2121126', price: 200, transfer_price: 180, stock: 10, options: { Diámetro: 'M8', Largo: '30' } }] },
 ];
 
-async function setup(page, { failSku } = {}) {
+async function setup(page, { failSku, existingPhoto = false, failGallerySave = false } = {}) {
   const writes = [];
+  const galleryWrites = [];
+  let gallery = [{ id: 'local', src: '/imagenes/portada-local.jpeg', alt: 'Frente del local' }];
+  const uploads = [];
   const errors = [];
   const products = fixture();
+  if (existingPhoto) products[0].product_images = [{ external_url: '/imagenes/logo-icon.png', storage_path: null, position: 0 }];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(({ host, email }) => {
     const now = Math.floor(Date.now() / 1000);
@@ -28,7 +32,19 @@ async function setup(page, { failSku } = {}) {
     const request = route.request(), url = new URL(request.url());
     if (url.host !== host) return route.continue();
     if (url.pathname.endsWith('/admin_members')) return route.fulfill({ json: [{ email: member }] });
+    if (url.pathname.endsWith('/storefront_gallery')) {
+      if (request.method() === 'GET') return route.fulfill({ json: { id: true, images: gallery } });
+      const body = request.postDataJSON(); galleryWrites.push(body);
+      if (failGallerySave) { failGallerySave = false; return route.fulfill({ status: 500, json: { message: 'Publicación fallida simulada' } }); }
+      gallery = body.images;
+      return route.fulfill({ json: null });
+    }
     if (url.pathname.endsWith('/products') && request.method() === 'GET') return route.fulfill({ json: products });
+    if (url.pathname.startsWith('/storage/v1/object/product-images/') && request.method() === 'POST') {
+      uploads.push(url.pathname);
+      return route.fulfill({ json: { Key: url.pathname.split('/object/')[1] } });
+    }
+    if (url.pathname.startsWith('/storage/v1/object/public/product-images/') && request.method() === 'GET') return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XkAAAAASUVORK5CYII=', 'base64') });
     if (url.pathname.endsWith('/rpc/save_catalog_product')) {
       const body = request.postDataJSON(); writes.push(body);
       if (body.p_product.sku === failSku) { failSku = null; return route.fulfill({ status: 500, json: { code: 'P0001', message: 'Fallo de guardado simulado' } }); }
@@ -39,14 +55,14 @@ async function setup(page, { failSku } = {}) {
     }
     return route.fulfill({ status: 403, json: { message: 'Operación bloqueada por la prueba local' } });
   });
-  return { writes, errors };
+  return { writes, errors, uploads, galleryWrites };
 }
 
 test('módulos independientes y carga de varios artículos sin formularios individuales', async ({ page }) => {
   const { writes, errors } = await setup(page);
   await page.goto('/admin/productos');
   await expect(page.getByRole('heading', { name: 'Productos', exact: true })).toBeVisible();
-  await expect(page.locator('.product-module-card')).toHaveCount(5);
+  await expect(page.locator('.product-module-card')).toHaveCount(6);
   await page.locator('a.product-module-card[href="/admin/productos/carga"]').click();
   await expect(page.getByRole('heading', { level: 1, name: 'Carga rápida' })).toBeVisible();
   await page.getByLabel('Código / SKU fila 1', { exact: true }).fill('NUEVO-001');
@@ -111,6 +127,167 @@ test('precios: solo revisa y guarda coincidencias del catálogo', async ({ page 
   expect(errors).toEqual([]);
 });
 
+async function photoFile(page, name, color) {
+  const data = await page.evaluate((color) => {
+    const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
+    const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, 8, 8);
+    return canvas.toDataURL('image/png').split(',')[1];
+  }, color);
+  return { name, mimeType: 'image/png', buffer: Buffer.from(data, 'base64') };
+}
+
+test('Nosotros: arrastra el encuadre, publica y conserva posición y zoom al recargar', async ({ page }) => {
+  const { galleryWrites, errors } = await setup(page);
+  await page.goto('/admin/nosotros');
+  const frame = page.getByRole('group', { name: 'Encuadre de foto 1', exact: true });
+  await expect(frame.getByRole('img')).toHaveCSS('object-position', '50% 0%');
+  await expect.poll(() => frame.getByRole('img').evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
+  await page.getByRole('slider', { name: 'Zoom de foto 1', exact: true }).press('End');
+  await frame.scrollIntoViewIfNeeded();
+  const rect = await frame.boundingBox();
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(rect.x + rect.width / 2 + 40, rect.y + rect.height / 2 - 40, { steps: 5 });
+  await page.mouse.up();
+  const horizontal = page.getByRole('slider', { name: 'Posición horizontal de foto 1', exact: true });
+  const vertical = page.getByRole('slider', { name: 'Posición vertical de foto 1', exact: true });
+  expect(Number(await horizontal.inputValue())).toBeLessThan(50);
+  expect(Number(await vertical.inputValue())).toBeGreaterThan(0);
+  await frame.press('ArrowUp');
+  const expected = await frame.getByRole('img').evaluate((image) => ({ position: image.style.objectPosition, transform: image.style.transform, origin: image.style.transformOrigin }));
+  expect(galleryWrites).toHaveLength(0);
+  await page.screenshot({ path: '.next/ui-results/nosotros-encuadre.png', fullPage: true });
+  await page.getByRole('button', { name: 'Guardar y publicar', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Fotos publicadas.');
+  expect(galleryWrites).toHaveLength(1);
+  expect(galleryWrites[0].images[0].zoom).toBe(3);
+  expect(galleryWrites[0].images[0].position.x).toBeLessThan(50);
+  await page.reload();
+  await expect(page.getByRole('slider', { name: 'Zoom de foto 1', exact: true })).toHaveValue('300');
+  await expect.poll(() => frame.getByRole('img').evaluate((image) => image.style.objectPosition)).toBe(expected.position);
+  await page.goto('/#nosotros');
+  const publicPhoto = page.locator('.storefront-photo');
+  await expect.poll(() => publicPhoto.evaluate((image) => image.style.objectPosition)).toBe(expected.position);
+  await expect.poll(() => publicPhoto.evaluate((image) => image.style.transform)).toBe(expected.transform);
+  await expect.poll(() => publicPhoto.evaluate((image) => image.style.transformOrigin)).toBe(expected.origin);
+  expect(errors).toEqual([]);
+});
+
+test('Nosotros: arrastre táctil, controles y restablecer; conserva cambios si falla publicar', async ({ page }) => {
+  const { galleryWrites, errors } = await setup(page, { failGallerySave: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/admin/nosotros');
+  const frame = page.getByRole('group', { name: 'Encuadre de foto 1', exact: true });
+  await expect.poll(() => frame.getByRole('img').evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Celular', exact: true }).click();
+  await page.getByRole('slider', { name: 'Zoom de foto 1', exact: true }).press('End');
+  await frame.scrollIntoViewIfNeeded();
+  const rect = await frame.boundingBox();
+  const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x - 30, y: y - 30, id: 1 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+  expect(Number(await page.getByRole('slider', { name: 'Posición horizontal de foto 1', exact: true }).inputValue())).toBeGreaterThan(50);
+  await page.getByRole('slider', { name: 'Posición vertical de foto 1', exact: true }).press('End');
+  await page.screenshot({ path: '.next/ui-results/nosotros-encuadre-mobile.png', fullPage: true });
+  await page.getByRole('button', { name: 'Guardar y publicar', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('No se pudieron publicar');
+  await expect(page.getByRole('slider', { name: 'Posición vertical de foto 1', exact: true })).toHaveValue('100');
+  await page.getByRole('button', { name: 'Guardar y publicar', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Fotos publicadas.');
+  expect(galleryWrites).toHaveLength(2);
+  await page.getByRole('button', { name: 'Restablecer encuadre de foto 1', exact: true }).click();
+  await expect(page.getByRole('slider', { name: 'Zoom de foto 1', exact: true })).toHaveValue('100');
+  await expect(frame.getByRole('img')).toHaveCSS('object-position', '50% 0%');
+  expect(galleryWrites).toHaveLength(2);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('fotos por SKU: revisión, corrección, portada y conservación de la galería', async ({ page }) => {
+  const { writes, errors, uploads } = await setup(page, { existingPhoto: true });
+  await page.goto('/admin/productos/fotos');
+  await expect(page.getByRole('heading', { name: 'Fotos del catálogo' })).toBeVisible();
+  const input = page.getByLabel('Seleccionar fotos para revisar', { exact: true });
+  await input.setInputFiles([
+    await photoFile(page, '2120289-2.png', 'blue'),
+    await photoFile(page, '2120289-1.png', 'red'),
+    await photoFile(page, 'AJENO-3.png', 'yellow'),
+    await photoFile(page, '2121126-1.png', 'green'),
+  ]);
+  await expect(page.locator('.photo-review-table tbody tr')).toHaveCount(4);
+  await expect(page.getByText(/Sin coincidencia: corregí el código/)).toBeVisible();
+  await expect(page.getByLabel('Aplicar foto AJENO-3.png', { exact: true })).not.toBeChecked();
+  await expect(page.getByText('Bulón hexagonal · galería compartida de todas las medidas', { exact: true })).toBeVisible();
+  expect(uploads).toHaveLength(0); expect(writes).toHaveLength(0);
+  await page.getByLabel('Código destino de AJENO-3.png', { exact: true }).fill('2120289');
+  await page.getByLabel('Aplicar foto AJENO-3.png', { exact: true }).check();
+  await expect(page.getByText('3 nuevas + 1 existentes = 4 fotos', { exact: true })).toBeVisible();
+  const firstGallery = page.locator('.photo-gallery-preview').filter({ hasText: 'Regulador de oxígeno' });
+  await expect(firstGallery.locator('figure').first().getByRole('img')).toHaveAttribute('alt', '2120289-1.png');
+  await page.getByRole('link', { name: 'Catálogo', exact: true }).click();
+  await page.getByRole('link', { name: 'Fotos', exact: true }).click();
+  await expect(page.locator('.photo-review-table tbody tr')).toHaveCount(4);
+  await page.screenshot({ path: '.next/ui-results/fotos-revision.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: '.next/ui-results/fotos-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('button', { name: 'Guardar fotos seleccionadas' }).click();
+  await expect(page.getByText('2 artículos con fotos guardadas.', { exact: true })).toBeVisible();
+  expect(uploads).toHaveLength(4); expect(writes).toHaveLength(2);
+  const simple = writes.find((item) => item.p_product.id === firstId);
+  const grouped = writes.find((item) => item.p_product.id === secondId);
+  expect(simple.p_images).toHaveLength(4);
+  expect(simple.p_images[3].external_url).toBe('/imagenes/logo-icon.png');
+  expect(simple.p_images.slice(0, 3).every(image => image.storage_path && !image.external_url)).toBe(true);
+  expect(simple.p_product.price).toBe(100); expect(simple.p_product.stock).toBe(5); expect(simple.p_product.published).toBe(false);
+  expect(grouped.p_images).toHaveLength(1); expect(grouped.p_variants[0].sku).toBe('2121126');
+  await expect(page.locator('.photo-review-table tbody tr')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('fotos por SKU: bloquea órdenes repetidos y reintenta solo el artículo fallido', async ({ page }) => {
+  const { writes, errors, uploads } = await setup(page, { failSku: 'GRP-BULON' });
+  await page.goto('/admin/productos/fotos');
+  await page.getByLabel('Seleccionar fotos para revisar', { exact: true }).setInputFiles([
+    await photoFile(page, '2120289-1.png', 'red'),
+    await photoFile(page, '2121126-1.png', 'blue'),
+    await photoFile(page, 'GRP-BULON-1.png', 'green'),
+  ]);
+  await expect(page.getByRole('button', { name: 'Guardar fotos seleccionadas' })).toBeDisabled();
+  await page.getByLabel('Orden de GRP-BULON-1.png', { exact: true }).fill('2');
+  await page.getByRole('button', { name: 'Guardar fotos seleccionadas' }).click();
+  await expect(page.getByText(/1 artículos con fotos guardadas\. 1 no se guardaron/)).toBeVisible();
+  expect(writes).toHaveLength(2); expect(uploads).toHaveLength(3);
+  await expect(page.locator('.photo-review-table tbody tr')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Guardar fotos seleccionadas' }).click();
+  await expect(page.getByText('1 artículos con fotos guardadas.', { exact: true })).toBeVisible();
+  expect(writes).toHaveLength(3); expect(uploads).toHaveLength(5);
+  expect(writes[2].p_product.id).toBe(secondId); expect(writes[2].p_images).toHaveLength(2);
+  await expect(page.locator('.photo-review-table tbody tr')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('fotos por SKU: una imagen ilegible no modifica el catálogo y puede quitarse', async ({ page }) => {
+  const { writes, errors, uploads } = await setup(page);
+  await page.goto('/admin/productos/fotos');
+  await page.getByLabel('Seleccionar fotos para revisar', { exact: true }).setInputFiles([
+    await photoFile(page, '2120289-1.png', 'red'),
+    { name: '2121126-1.png', mimeType: 'image/png', buffer: Buffer.from('imagen-corrupta') },
+  ]);
+  await page.getByRole('button', { name: 'Guardar fotos seleccionadas' }).click();
+  await expect(page.locator('.photo-manager').getByRole('alert')).toHaveText('No se pudo leer 2121126-1.png. No se guardó este lote.');
+  expect(writes).toHaveLength(0); expect(uploads).toHaveLength(0);
+  await page.getByRole('button', { name: 'Quitar foto 2121126-1.png', exact: true }).click();
+  await page.getByRole('button', { name: 'Guardar fotos seleccionadas' }).click();
+  await expect(page.getByText('1 artículos con fotos guardadas.', { exact: true })).toBeVisible();
+  expect(writes).toHaveLength(1); expect(uploads).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
 test('PDF real: lectura local, vista previa y ningún guardado automático', async ({ page }) => {
   test.skip(!existsSync('data/Listado de precios.pdf'), 'El listado comercial no se incluye en el repositorio.');
   const { writes, errors } = await setup(page);
@@ -141,7 +318,7 @@ test('un lote con un fallo conserva solo el pendiente y permite reintentarlo', a
 test('los módulos se adaptan al teléfono sin desbordar el ancho de la página', async ({ page }) => {
   await setup(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const module of ['', '/carga', '/catalogo', '/precios']) {
+  for (const module of ['', '/carga', '/catalogo', '/precios', '/fotos']) {
     await page.goto(`/admin/productos${module}`);
     await expect(page.locator('.product-workspace-title')).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
