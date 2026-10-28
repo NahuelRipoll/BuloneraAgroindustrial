@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { KeyRound, LogIn, LogOut, Mail } from "lucide-react";
+import { Eye, EyeOff, KeyRound, LogIn, LogOut, Mail } from "lucide-react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -15,6 +15,7 @@ export function AdminAuthGate({ children }: { children: ReactNode }) {
   const [view, setView] = useState<View>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -105,10 +106,15 @@ export function AdminAuthGate({ children }: { children: ReactNode }) {
     <p>{view === "forgot" ? "Te enviaremos un enlace para crear una nueva contraseña." : "Ingresá con el correo y la contraseña asignados por un administrador."}</p>
     <form className="admin-login-form" onSubmit={view === "forgot" ? requestPasswordReset : login}>
       <input type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="correo@empresa.com" />
-      {view === "login" ? <input type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Contraseña" /> : null}
+      {view === "login" ? <div className="admin-password-field">
+        <input id="admin-login-password" type={showPassword ? "text" : "password"} required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Contraseña" aria-label="Contraseña" />
+        <button className="admin-password-toggle" type="button" aria-controls="admin-login-password" aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"} onClick={() => setShowPassword((visible) => !visible)}>
+          {showPassword ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}
+        </button>
+      </div> : null}
       <button className="button" type="submit" disabled={submitting}><LogIn size={18} /> {submitting ? "Procesando…" : view === "forgot" ? "Enviar enlace" : "Ingresar"}</button>
     </form>
-    <button className="admin-login-link" type="button" onClick={() => { setView(view === "forgot" ? "login" : "forgot"); setMessage(""); }}>{view === "forgot" ? "Volver al inicio de sesión" : "Olvidé mi contraseña"}</button>
+    <button className="admin-login-link" type="button" onClick={() => { setView(view === "forgot" ? "login" : "forgot"); setShowPassword(false); setMessage(""); }}>{view === "forgot" ? "Volver al inicio de sesión" : "Olvidé mi contraseña"}</button>
     {message ? <p className="admin-notice">{message}</p> : null}
   </section>;
 
