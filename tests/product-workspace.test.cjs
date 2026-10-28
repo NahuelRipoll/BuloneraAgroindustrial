@@ -26,6 +26,36 @@ test('precios repetidos diferentes y códigos ambiguos nunca se aplican automát
   assert.equal(prices.buildPricePreview([product()], [{ sku: '00123', price: 200 }, { sku: '00123', price: 300 }]).conflicts.length, 1);
   assert.equal(prices.buildPricePreview([product(), product({ id: 'two' })], [{ sku: '00123', price: 200 }]).changes.length, 0);
 });
+test('los códigos ajenos se omiten antes de revisar conflictos o precios inválidos', () => {
+  const result = prices.buildPricePreview([product()], [
+    { sku: 'AJENO', price: 200 }, { sku: 'AJENO', price: 300 },
+    { sku: 'OTRO', price: 0 }, { sku: '00123', price: 200 },
+  ]);
+  assert.deepEqual(Array.from(result.unmatched), ['AJENO', 'OTRO']);
+  assert.equal(result.conflicts.length, 0);
+  assert.equal(result.invalid, 0);
+  assert.equal(result.changes.length, 1);
+});
+test('solo las coincidencias de productos y medidas se aplican sin crear artículos', () => {
+  const products = [product(), product({ id: 'variants', sku: 'GRP', variants: [{ sku: '00045', price: 100, stock: 0 }] }), product({ id: 'unchanged', sku: '00067' })];
+  const result = prices.buildPricePreview(products, [{ sku: '00123', price: 200 }, { sku: '00045', price: 300 }, { sku: '00067', price: 100 }, { sku: 'GRP', price: 500 }, { sku: '45', price: 600 }]);
+  assert.equal(result.changes.length, 2);
+  assert.equal(result.unchanged, 1);
+  const updated = prices.applyPriceChanges(products, result.changes);
+  assert.equal(updated.length, 3);
+  assert.equal(updated[0].price, 200);
+  assert.equal(updated[1].variants[0].price, 300);
+  assert.equal(updated[1].variants[0].stock, 0);
+  assert.equal(updated[2], products[2]);
+});
+test('Código tiene prioridad sobre la descripción Artículo al leer precios', () => {
+  const rows = [['Artículo', 'Código', 'Lista 1', 'Lista 2', 'Lista 3'], ['Bulón', '00123', 200, 180, 160]];
+  for (const list of [1, 2, 3]) {
+    const result = imports.extractPriceRecordsFromRows(rows, list);
+    assert.equal(result[0].sku, '00123');
+    assert.equal(result[0].price, [200, 180, 160][list - 1]);
+  }
+});
 test('el ajuste porcentual alcanza medidas y recalcula la base sin alterar otros rubros', () => {
   const products = [product({ variants: [{ sku: 'M8', diameter: 'M8', price: 100, stock: 3 }, { sku: 'M10', diameter: 'M10', price: 200, stock: 7 }] }), product({ id: 'two', sku: 'OTHER', category: 'Herramientas' })];
   const preview = prices.buildPricePreview(products, prices.percentageInputs(products, 10, '', 'Bulones'));

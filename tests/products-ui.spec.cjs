@@ -83,6 +83,34 @@ test('edición pendiente y ajustes de medidas sobreviven a la navegación entre 
   expect(errors).toEqual([]);
 });
 
+test('precios: solo revisa y guarda coincidencias del catálogo', async ({ page }) => {
+  const { writes, errors } = await setup(page);
+  await page.goto('/admin/productos/precios');
+  await page.getByRole('button', { name: 'Excel / CSV', exact: true }).click();
+  await page.locator('input[type="file"][accept=".xlsx,.csv"]').setInputFiles({
+    name: 'precios.csv', mimeType: 'text/csv',
+    buffer: Buffer.from('Artículo;Código;Lista 1;Lista 2;Lista 3\nRegulador;2120289;250;240;230\nMedida;2121126;350;340;330\nAjeno;AJENO;500;490;480\nAjeno;AJENO;600;590;580'),
+  });
+  await expect(page.locator('.price-review-table tbody tr')).toHaveCount(2);
+  await expect(page.getByText(/1 códigos ajenos al catálogo omitidos/)).toBeVisible();
+  await expect(page.getByText('AJENO', { exact: true })).toHaveCount(0);
+  expect(writes).toHaveLength(0);
+  await page.getByRole('button', { name: 'Guardar precios seleccionados' }).click();
+  await expect(page.getByText('2 artículos guardados.', { exact: true }).first()).toBeVisible();
+  expect(writes).toHaveLength(2);
+  expect(writes.map(item => item.p_product.id).sort()).toEqual([firstId, secondId].sort());
+  expect(writes.find(item => item.p_product.id === firstId).p_product.price).toBe(250);
+  expect(writes.find(item => item.p_product.id === secondId).p_variants[0].price).toBe(350);
+  await page.locator('input[type="file"][accept=".xlsx,.csv"]').setInputFiles({
+    name: 'sin-coincidencias.csv', mimeType: 'text/csv', buffer: Buffer.from('Código;Precio\nAJENO;500'),
+  });
+  await expect(page.locator('.price-review-table tbody tr')).toHaveCount(0);
+  await expect(page.getByText('No hay cambios de precio para aplicar a los artículos del catálogo con este listado.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Guardar precios seleccionados' })).toBeDisabled();
+  expect(writes).toHaveLength(2);
+  expect(errors).toEqual([]);
+});
+
 test('PDF real: lectura local, vista previa y ningún guardado automático', async ({ page }) => {
   test.skip(!existsSync('data/Listado de precios.pdf'), 'El listado comercial no se incluye en el repositorio.');
   const { writes, errors } = await setup(page);

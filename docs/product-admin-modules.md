@@ -21,7 +21,9 @@ Admite CSV del ERP en UTF-8 o Windows-1252 y la plantilla Excel con hojas Articu
 - **Porcentaje:** aumentos o reducciones por marca/rubro, incluyendo las medidas.
 - **Grilla manual:** edición directa de precios por SKU, sin abrir el editor completo de cada artículo.
 
-La tabla muestra precio actual, nuevo, diferencia y página del PDF. Se pueden corregir valores y desmarcar filas antes de guardar. Los filtros no borran las selecciones previas; el resumen muestra el total real seleccionado. Los códigos sin coincidencia o repetidos con precios distintos se informan y quedan fuera de la actualización. La comparación es exacta salvo espacios exteriores y mayúsculas: `00123` y `123` son códigos distintos.
+La tabla muestra únicamente cambios para códigos de productos o medidas ya guardados en el catálogo, incluyendo artículos sin publicar o sin stock. Los borradores exclusivamente locales no participan y este módulo no crea artículos nuevos. Los códigos ajenos se omiten antes de detectar conflictos y se informa solo su cantidad. Los códigos del catálogo repetidos con precios distintos o ambiguos se detallan y quedan fuera de la actualización. Si aparecen Artículo y Código en la planilla, se utiliza Código como SKU.
+
+La tabla muestra precio actual, nuevo, diferencia y página del PDF. Se pueden corregir valores y desmarcar filas antes de guardar. Los filtros no borran las selecciones previas; el resumen muestra el total real seleccionado. La comparación es exacta salvo espacios exteriores y mayúsculas: `00123` y `123` son códigos distintos.
 
 Guardar afecta únicamente los productos seleccionados. Si una parte del lote falla, los artículos fallidos siguen seleccionados para reintentar. Transferencia se calcula con 10% de descuento. Una edición posterior incompatible con la vista previa bloquea el guardado y pide regenerarla.
 

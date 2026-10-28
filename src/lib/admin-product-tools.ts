@@ -69,7 +69,8 @@ export function extractPriceRecordsFromRows(rawRows: (string | number | null)[][
   let headerIndex = -1, skuIndex = 0, priceIndex = 1, transferIndex = -1;
   for (let i = 0; i < Math.min(10, rawRows.length); i++) {
     const row = (rawRows[i] ?? []).map((c) => String(c ?? "").trim().toLowerCase());
-    const sIdx = row.findIndex((c) => /^(c[oó]digo|sku|cod|codigoarticulo|art[ií]culo|articulo)$/i.test(c) || /c[oó]digo|sku/i.test(c));
+    const codeIndex = row.findIndex((c) => /^(c[oó]digo|sku|cod|codigoarticulo)$/i.test(c));
+    const sIdx = codeIndex >= 0 ? codeIndex : row.findIndex((c) => /c[oó]digo|sku/i.test(c) || /^art[ií]culo$/i.test(c));
     const listColumn = row.findIndex((c) => new RegExp(`^(?:precio\\s+)?lista\\s*${list}$`, "i").test(c));
     const hasLists = row.some((c) => /^(?:precio\s+)?lista\s*[123]$/i.test(c));
     if (sIdx >= 0 && hasLists && listColumn < 0) throw new Error(`No se encontró la columna Lista ${list} en el archivo.`);

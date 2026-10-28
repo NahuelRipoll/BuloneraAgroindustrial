@@ -17,11 +17,15 @@ export function buildPricePreview(products: LocalProductDraft[], inputs: PriceIn
     }
   }
   const grouped = new Map<string, PriceInput[]>();
+  const unmatched = new Map<string, string>();
   for (const input of inputs) {
     const key = priceCode(input.sku);
-    if (!key || !Number.isFinite(input.price) || input.price <= 0) { result.invalid++; continue; }
+    if (!key) { result.invalid++; continue; }
+    if (!targets.has(key)) { unmatched.set(key, input.sku); continue; }
+    if (!Number.isFinite(input.price) || input.price <= 0) { result.invalid++; continue; }
     grouped.set(key, [...(grouped.get(key) || []), input]);
   }
+  result.unmatched = [...unmatched.values()];
   for (const [key, values] of grouped) {
     const target = targets.get(key);
     if (new Set(values.map((value) => roundPrice(value.price))).size !== 1 || (target && target.length !== 1)) { result.conflicts.push(values[0].sku); continue; }

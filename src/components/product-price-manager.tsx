@@ -10,7 +10,8 @@ import { formatCurrency } from "@/lib/format";
 type Product = LocalProductDraft & { image: string };
 const methods = [["pdf", "Listado PDF"], ["archivo", "Excel / CSV"], ["pegar", "Pegar precios"], ["porcentaje", "Porcentaje"], ["manual", "Grilla manual"]] as const;
 
-export function ProductPriceManager({ products, disabled, onSave, onBusyChange }: { products: Product[]; disabled: boolean; onSave: (products: Product[], progress: (message: string) => void) => Promise<string[]>; onBusyChange: (busy: boolean) => void }) {
+export function ProductPriceManager({ products: allProducts, disabled, onSave, onBusyChange }: { products: Product[]; disabled: boolean; onSave: (products: Product[], progress: (message: string) => void) => Promise<string[]>; onBusyChange: (busy: boolean) => void }) {
+  const products = useMemo(() => allProducts.filter((product) => Boolean(product.remoteId)), [allProducts]);
   const [method, setMethod] = useState<string>("pdf");
   const [list, setList] = useState<1 | 2 | 3>(1);
   const [paste, setPaste] = useState("");
@@ -78,6 +79,7 @@ export function ProductPriceManager({ products, disabled, onSave, onBusyChange }
   }
   return <section className="card admin-card price-manager">
     <div className="admin-heading"><div><span className="eyebrow">Actualizar sin transcribir</span><h2>Precios del catálogo</h2></div><button className="button-outline" disabled={disabled || busy} onClick={() => downloadCatalogPriceTemplate(products)}>Descargar listado de códigos</button></div>
+    <p>Solo se actualizan códigos de artículos y medidas ya guardados en el catálogo. Los demás se omiten y no se crean artículos nuevos.</p>
     <div className="price-methods" role="group" aria-label="Forma de actualizar precios">{methods.map(([id, title]) => <button key={id} aria-pressed={method === id} disabled={busy} onClick={() => { setMethod(id); setError(""); }}>{title}</button>)}</div>
     <fieldset disabled={disabled || busy}>
       {method === "pdf" && <div className="price-input-panel"><h3>Leer precios del PDF del ERP</h3><p>Se leen los códigos y la lista elegida. El PDF se procesa en tu navegador. Los precios cero y las filas dudosas quedan excluidos.</p><div className="workspace-toolbar"><label>Lista a utilizar<select value={list} onChange={(event) => setList(Number(event.target.value) as 1 | 2 | 3)}><option value={1}>Lista 1</option><option value={2}>Lista 2</option><option value={3}>Lista 3</option></select></label><label className="button gallery-upload">Seleccionar PDF<input type="file" accept=".pdf,application/pdf" onChange={(event) => { void read(event.target.files?.[0]); event.target.value = ""; }} /></label></div></div>}
@@ -87,8 +89,9 @@ export function ProductPriceManager({ products, disabled, onSave, onBusyChange }
     </fieldset>
     <p role="status">{message || (disabled ? "Cargando catálogo…" : "Elegí cómo querés actualizar los precios.")}</p>{error && <p role="alert" className="admin-notice">{error}</p>}
     {preview && <>
-      <div className="price-review-head"><div><span className="eyebrow">Revisión antes de guardar</span><h3>{source}</h3><p>{changes.length} filas · {preview.unchanged} sin cambios · {preview.unmatched.length} códigos sin coincidencia · {preview.conflicts.length} códigos ambiguos · {preview.invalid} filas inválidas</p></div></div>
-      {(preview.unmatched.length > 0 || preview.conflicts.length > 0) && <details className="entry-paste"><summary>Ver códigos que no se van a actualizar</summary><p>Sin coincidencia: {preview.unmatched.join(", ") || "ninguno"}</p><p>Repetidos con distintos precios o ambiguos: {preview.conflicts.join(", ") || "ninguno"}</p></details>}
+      <div className="price-review-head"><div><span className="eyebrow">Revisión antes de guardar</span><h3>{source}</h3><p>{changes.length} precios del catálogo para revisar · {preview.unchanged} sin cambios · {preview.unmatched.length} códigos ajenos al catálogo omitidos · {preview.conflicts.length} códigos ambiguos · {preview.invalid} filas inválidas</p></div></div>
+      {!changes.length && <p>No hay cambios de precio para aplicar a los artículos del catálogo con este listado.</p>}
+      {preview.conflicts.length > 0 && <details className="entry-paste"><summary>Ver códigos del catálogo que requieren revisión</summary><p>Repetidos con distintos precios o ambiguos: {preview.conflicts.join(", ")}</p></details>}
       <fieldset disabled={busy || disabled}>
         <div className="workspace-toolbar"><button className="button-outline" onClick={() => setSelected(new Set(filtered.filter((item) => item.after !== item.before).map((item) => item.key)))}>Seleccionar cambios filtrados</button><button className="button-muted" onClick={() => setSelected(new Set())}>Desmarcar todos</button><span>Transferencia: 10% de descuento sobre el nuevo precio.</span></div>
         <div className="admin-table-wrap"><table className="admin-table price-review-table"><thead><tr><th>Aplicar</th><th>Código</th><th>Artículo / medida</th><th>Actual</th><th>Nuevo</th><th>Diferencia</th><th>Página PDF</th></tr></thead><tbody>{visible.map((item) => <tr key={item.key} className={selected.has(item.key) ? "price-row-selected" : ""}>

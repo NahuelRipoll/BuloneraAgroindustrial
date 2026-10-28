@@ -1,6 +1,6 @@
 # Pendientes para la próxima sesión
 
-## Importación de precios por artículos existentes
+## Importación de precios por artículos existentes — implementado el 28/10/2026
 
 Pedido del usuario al cerrar la sesión del 27/10/2026: al cargar un PDF o Excel de precios, trabajar únicamente con los artículos que ya existen en el catálogo.
 
@@ -9,4 +9,4 @@ Pedido del usuario al cerrar la sesión del 27/10/2026: al cargar un PDF o Excel
 - Mantener la elección de Lista 1, 2 o 3 y la revisión antes de guardar.
 - La importación de precios no debe crear artículos nuevos.
 
-El flujo actual ya compara códigos con el catálogo. Revisar su comportamiento y la experiencia con el listado completo antes de definir el ajuste. Este pedido queda para la próxima sesión.
+Implementado: la revisión incluye únicamente coincidencias con productos o variantes guardados en el catálogo. Los códigos ajenos se omiten y solo se informa su cantidad; no generan conflictos. Código tiene prioridad sobre Artículo en Excel/CSV. Se conservan los ceros iniciales, la elección de lista y la confirmación antes de guardar. Los borradores exclusivamente locales quedan excluidos para evitar altas desde Precios.
