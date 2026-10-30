@@ -1367,8 +1367,9 @@ p {
 .bulk-toolbar input { width: 72px; padding: 8px; color: white; background: var(--bg); border: 1px solid #444; border-radius: 4px; }
 .editable-table input:not([type="checkbox"]) { min-width: 90px; max-width: 155px; padding: 8px 9px; color: white; background: #151515; border: 1px solid #383838; border-radius: 4px; }
 .editable-table .price-input { width: 120px; color: #ffb091; font-weight: 800; }
-.catalog-price-control { display: flex; flex-direction: column; gap: 9px; min-width: 150px; }
-.catalog-price-control > .price-input { order: -1; width: 150px; text-align: right; font-variant-numeric: tabular-nums; }
+.editable-table { min-width: 1600px; }
+.catalog-price-control { display: flex; align-items: center; gap: 12px; min-width: 280px; }
+.catalog-price-control > .price-input { order: -1; flex: 0 0 150px; width: 150px; text-align: right; font-variant-numeric: tabular-nums; }
 .catalog-price-control > label { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; white-space: nowrap; cursor: pointer; }
 .catalog-price-control > label > input[type="checkbox"] { flex: 0 0 17px; margin: 0; }
 .editable-table .stock-input { width: 76px; min-width: 76px; }
