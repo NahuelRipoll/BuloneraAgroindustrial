@@ -19,8 +19,8 @@ export function CartDrawer() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: items.map(({ product, quantity }) => ({ id: product.id, sku: product.sku, quantity })) }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "No pudimos iniciar el pago.");
+      const data = await response.json().catch(() => null);
+      if (!response.ok || typeof data?.url !== "string") throw new Error(typeof data?.error === "string" ? data.error : "No pudimos iniciar el pago.");
       window.location.assign(data.url);
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : "No pudimos iniciar el pago.");

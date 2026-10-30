@@ -6,14 +6,14 @@ const vm = require('node:vm');
 const { stripTypeScriptTypes } = require('node:module');
 
 // Ejecutar el módulo real con las dos fronteras externas (HTTP y DB) simuladas.
-function load(payment = {}, { buyerId, seller = {} } = {}) {
+function load(payment = {}, { buyerId, seller = {}, rpcError = null, apiFails = false } = {}) {
   const calls = [];
-  const db = { rpc: async (...args) => { calls.push(args); return { error: null }; } };
+  const db = { rpc: async (...args) => { calls.push(args); return { error: rpcError }; } };
   const context = {
     exports: {}, Buffer, URL, AbortSignal,
     process: { env: { NEXT_PUBLIC_MERCADOPAGO_ENABLED: 'true', MERCADOPAGO_ACCESS_TOKEN: 'test', MERCADOPAGO_WEBHOOK_SECRET: 'secret', NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'key', APP_URL: 'https://preview.example' } },
     require: (name) => name === '@supabase/supabase-js' ? { createClient: () => db } : require(name),
-    fetch: async (url) => ({ ok: true, json: async () => url.endsWith('/users/me') ? seller : payment }),
+    fetch: async (url) => ({ ok: !apiFails, status: apiFails ? 503 : 200, json: async () => url.endsWith('/users/me') ? seller : payment }),
   };
   if (buyerId) context.process.env.MERCADOPAGO_TEST_BUYER_ID = buyerId;
   const code = stripTypeScriptTypes(readFileSync('src/lib/mercadopago.ts', 'utf8'))
@@ -74,6 +74,31 @@ test('pago pendiente no crea venta', async () => {
   assert.equal(calls.length, 0);
 });
 
+test('rechazados, cancelados, en proceso, reintegrados y contracargos no crean ventas', async () => {
+  for (const status of ['rejected', 'cancelled', 'in_process', 'refunded', 'charged_back']) {
+    const { api, calls } = load({ live_mode: false, status });
+    assert.equal(await api.confirmPayment('123'), status);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('fallos de Mercado Pago o de la base no devuelven una confirmación falsa', async () => {
+  const unavailable = load({}, { apiFails: true });
+  await assert.rejects(unavailable.api.confirmPayment('123'), /503/);
+  assert.equal(unavailable.calls.length, 0);
+  const failed = load({ id: 123, live_mode: false, status: 'approved', external_reference: 'order', transaction_amount: 200, currency_id: 'ARS', collector_id: 456 }, { rpcError: new Error('DB') });
+  await assert.rejects(failed.api.confirmPayment('123'), /No se pudo confirmar/);
+});
+
+test('un aprobado con datos incompletos o inconsistentes se rechaza antes de escribir en la base', async () => {
+  const valid = { id: 123, live_mode: false, status: 'approved', external_reference: 'order', transaction_amount: 200, currency_id: 'ARS', collector_id: 456 };
+  for (const patch of [{ id: 124 }, { id: null }, { external_reference: '' }, { transaction_amount: null }, { transaction_amount: 0 }, { transaction_amount: -1 }, { transaction_amount: NaN }, { currency_id: null }, { currency_id: 'USD' }, { collector_id: null }]) {
+    const { api, calls } = load({ ...valid, ...patch });
+    await assert.rejects(api.confirmPayment('123'), /Datos de pago inválidos/);
+    assert.equal(calls.length, 0);
+  }
+});
+
 test('pago aprobado entrega a la transacción SQL los valores de la API', async () => {
   const { api, calls } = load({ id: 123, live_mode: false, status: 'approved', external_reference: 'order', transaction_amount: 1250.50, currency_id: 'ARS', collector_id: 456 });
   assert.equal(await api.confirmPayment('123', 'order'), 'approved');
@@ -112,12 +137,12 @@ test('la compilación oculta el botón en producción y conserva la configuraci�
 });
 
 const productId = '11111111-1111-4111-8111-111111111111';
-function loadCheckout({ stock = 5, testSeller = true, redirectUrl = 'https://www.mercadopago.com.ar/checkout/test' } = {}) {
+function loadCheckout({ stock = 5, testSeller = true, redirectUrl = 'https://www.mercadopago.com.ar/checkout/test', catalog, catalogError = null, insertError = null, preferenceError = false } = {}) {
   const saved = [];
   const preferences = [];
   const db = { from: () => ({
-    select: () => ({ eq: () => ({ in: async () => ({ data: [{ id: productId, name: 'Bulón', sku: 'B-1', price: 100, stock, featured: true, offer_price: 80, product_variants: [] }], error: null }) }) }),
-    insert: async (row) => { saved.push(row); return { error: null }; },
+    select: () => ({ eq: () => ({ in: async () => ({ data: catalog ?? [{ id: productId, name: 'Bulón', sku: 'B-1', price: 100, stock, featured: true, offer_price: 80, product_variants: [] }], error: catalogError }) }) }),
+    insert: async (row) => { saved.push(row); return { error: insertError }; },
   }) };
   const context = { exports: {}, URL, Date, console,
     require: (name) => name === 'next/server' ? { NextResponse: { json: (data, options) => ({ status: options?.status ?? 200, data }) } }
@@ -125,6 +150,7 @@ function loadCheckout({ stock = 5, testSeller = true, redirectUrl = 'https://www
         paymentConfig: () => ({ db, token: 'test', origin: 'https://preview.example' }),
         mercadoPago: async (_token, path, body) => {
           if (path === '/users/me') return { id: 42, tags: testSeller ? ['test_user'] : [] };
+          if (preferenceError) throw new Error('API no disponible');
           preferences.push(body);
           return { init_point: redirectUrl };
         },
@@ -190,4 +216,62 @@ test('checkout bloquea una cuenta vendedora real antes de crear pedido', async (
   assert.equal((await post(request([{ id: productId, sku: 'B-1', quantity: 1 }]))).status, 503);
   assert.equal(saved.length, 0);
   assert.equal(preferences.length, 0);
+});
+
+test('checkout rechaza cantidades inválidas, demasiadas líneas, SKU cambiado y borradores', async () => {
+  const line = { id: productId, sku: 'B-1', quantity: 1 };
+  for (const quantity of [0, -1, 1.5, '2', null, 10001]) {
+    const api = loadCheckout();
+    assert.equal((await api.post(api.request([{ ...line, quantity }]))).status, 400);
+    assert.equal(api.saved.length, 0);
+  }
+  for (const items of [[], null, Array.from({ length: 51 }, (_, i) => ({ ...line, id: `${productId}-${i}` }))]) {
+    const api = loadCheckout();
+    assert.equal((await api.post(api.request(items))).status, 400);
+  }
+  for (const patch of [{ sku: 'CAMBIADO' }, { id: 'local-borrador' }]) {
+    const api = loadCheckout();
+    assert.equal((await api.post(api.request([{ ...line, ...patch }]))).status, 409);
+    assert.equal(api.preferences.length, 0);
+  }
+});
+
+test('checkout rechaza JSON roto, cuerpo excesivo y catálogo no disponible', async () => {
+  const api = loadCheckout();
+  for (const [text, status] of [['{', 400], ['x'.repeat(16001), 400]]) {
+    const req = api.request([]); req.text = async () => text;
+    assert.equal((await api.post(req)).status, status);
+  }
+  for (const options of [{ catalogError: new Error('DB') }, { insertError: new Error('DB') }, { preferenceError: true }]) {
+    const failed = loadCheckout(options);
+    assert.equal((await failed.post(failed.request([{ id: productId, sku: 'B-1', quantity: 1 }]))).status, 503);
+    assert.equal(failed.preferences.length, 0);
+  }
+});
+
+test('checkout cobra una medida con oferta y rechaza comprar la base de un grupo', async () => {
+  const variantId = '22222222-2222-4222-8222-222222222222';
+  const catalog = [{ id: productId, sku: 'GRUPO', name: 'Bulones', price: 100, stock: 99, featured: true, offer_price: 80,
+    product_variants: [{ id: variantId, sku: '00045', price: 250, stock: 3, options: { Diámetro: 'M8', Largo: '30' } }] }];
+  const api = loadCheckout({ catalog });
+  const line = { id: `${productId}-${variantId}`, sku: '00045', quantity: 2, unit_price: 1 };
+  assert.equal((await api.post(api.request([line]))).status, 200);
+  assert.equal(api.saved[0].total, 400);
+  assert.equal(api.preferences[0].items[0].unit_price, 200);
+  assert.match(api.preferences[0].items[0].title, /M8 \/ 30/);
+  assert.equal((await api.post(api.request([{ id: productId, sku: 'GRUPO', quantity: 1 }]))).status, 409);
+  assert.equal((await api.post(api.request([{ ...line, quantity: 4 }]))).status, 409);
+});
+
+test('checkout rechaza precios cero y arma preferencia con expiración, moneda y webhook', async () => {
+  const noPrice = loadCheckout({ catalog: [{ id: productId, sku: 'B-1', price: 0, stock: 5, featured: false, product_variants: [] }] });
+  assert.equal((await noPrice.post(noPrice.request([{ id: productId, sku: 'B-1', quantity: 1 }]))).status, 409);
+  const api = loadCheckout();
+  const before = Date.now();
+  await api.post(api.request([{ id: productId, sku: 'B-1', quantity: 1 }]));
+  const preference = api.preferences[0];
+  assert.equal(preference.items[0].currency_id, 'ARS');
+  assert.equal(preference.notification_url, 'https://preview.example/api/mercadopago/webhook');
+  assert.equal(preference.expires, true);
+  assert.ok(new Date(preference.expiration_date_to).getTime() >= before + 29 * 60 * 1000);
 });

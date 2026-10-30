@@ -47,6 +47,12 @@ export async function confirmPayment(paymentId: string, expectedOrderId?: string
     if (!seller.tags?.includes("test_user") || String(seller.id) !== String(payment.collector_id)) throw new Error("Se rechazó un pago real o de otro vendedor en el entorno de pruebas");
   }
   if (payment.status !== "approved") return payment.status;
+  if (String(payment.id) !== paymentId || !Number.isSafeInteger(payment.id) || payment.id <= 0
+      || typeof payment.external_reference !== "string" || !payment.external_reference.trim()
+      || !Number.isFinite(payment.transaction_amount) || payment.transaction_amount <= 0
+      || payment.currency_id !== "ARS" || !Number.isSafeInteger(payment.collector_id) || payment.collector_id <= 0) {
+    throw new Error("Datos de pago inválidos");
+  }
   const { error } = await db.rpc("confirm_test_mercadopago_payment", {
     p_order_id: payment.external_reference,
     p_payment_id: String(payment.id),

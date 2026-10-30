@@ -17,8 +17,8 @@ export function PaymentResult() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ order, token, paymentId: paymentId && paymentId !== "null" ? paymentId : undefined }), signal: controller.signal,
     }).then(async (response) => {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "No pudimos verificar el pedido.");
+      const data = await response.json().catch(() => null);
+      if (!response.ok || typeof data?.status !== "string") throw new Error(typeof data?.error === "string" ? data.error : "No pudimos verificar el pedido.");
       setMessage(data.status === "paid" ? "Pago de prueba confirmado. Tu pedido quedó registrado." : ["rejected", "cancelled"].includes(data.status) ? "El pago no se completó. Podés volver a intentarlo desde el carrito." : "Tu pago todavía está pendiente de confirmación. Podés volver a consultar en unos instantes.");
     }).catch((error) => { if (!controller.signal.aborted) setMessage(error.message || "No pudimos verificar el pago."); });
     return () => controller.abort();

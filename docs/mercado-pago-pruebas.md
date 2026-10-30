@@ -1,5 +1,7 @@
 # Mercado Pago: entorno de pruebas
 
+Validación ampliada del 30/10/2026: ver [informe de pruebas](mercado-pago-validacion-2026-10-30.md). Incluye problemas corregidos, nueva migración pendiente y separación entre simulaciones locales y compras efectivas en Checkout Pro.
+
 Actualización del 30/10/2026: se autoriza integrar el código en `master` con Mercado Pago deshabilitado. `next.config.ts` fuerza la bandera pública a `false` en Vercel Production o rama `master`; `paymentConfig()` bloquea también las operaciones del servidor en esos entornos, aunque haya una bandera habilitada por error. Las pruebas permanecen en el preview de `feature/mercado-pago`. Esta integración no habilita cobros reales.
 
 La rama `feature/mercado-pago` implementa Checkout Pro mediante la API de preferencias. Los pagos están deshabilitados por defecto. Habilitarlos solamente en el preview de Vercel de esta rama. Se puede utilizar el Supabase actual: el checkout lee el catálogo y guarda las compras simuladas en tablas separadas de las ventas reales. Se comparte infraestructura y credenciales; no es un entorno completamente independiente.
