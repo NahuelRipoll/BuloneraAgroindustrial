@@ -121,6 +121,7 @@ test('la protección persiste y excluye precios sin impedir su edición manual',
   expect(writes[0].p_product.specs.price_import_protected).toBe(true);
   await page.reload();
   await expect(protection).toBeChecked();
+  await page.screenshot({ path: '.next/ui-results/catalogo-precio-manual.png', fullPage: true });
   await page.getByRole('link', { name: 'Precios', exact: true }).click();
   await page.getByRole('button', { name: 'Pegar precios', exact: true }).click();
   await page.getByRole('textbox', { name: 'Listado de códigos y precios' }).fill('2120289\t250\n2121126\t350');
