@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 export function paymentConfig() {
+  if (process.env.VERCEL_ENV === "production" || process.env.VERCEL_GIT_COMMIT_REF === "master") throw new Error("Pagos deshabilitados en producción");
   if (process.env.NEXT_PUBLIC_MERCADOPAGO_ENABLED !== "true") throw new Error("Pagos deshabilitados");
   const token = process.env.MERCADOPAGO_ACCESS_TOKEN;
   const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;

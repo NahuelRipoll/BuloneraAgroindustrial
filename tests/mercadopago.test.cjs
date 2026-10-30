@@ -90,6 +90,27 @@ test('pagos apagados por defecto y configuración HTTPS obligatoria', () => {
   assert.throws(() => api.paymentConfig(), /incompleta/);
 });
 
+test('producción y master bloquean pagos aunque la bandera esté habilitada', () => {
+  for (const environment of [{ VERCEL_ENV: 'production' }, { VERCEL_GIT_COMMIT_REF: 'master' }]) {
+    const { api, env, calls } = load();
+    Object.assign(env, environment);
+    assert.throws(() => api.paymentConfig(), /deshabilitados/);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('la compilación oculta el botón en producción y conserva la configuración del preview', () => {
+  const source = stripTypeScriptTypes(readFileSync('next.config.ts', 'utf8')).replace(/^import .*;\s*$/gm, '').replace('export default nextConfig;', 'exports.config = nextConfig;');
+  for (const env of [{ VERCEL_ENV: 'production', NEXT_PUBLIC_MERCADOPAGO_ENABLED: 'true' }, { VERCEL_GIT_COMMIT_REF: 'master', NEXT_PUBLIC_MERCADOPAGO_ENABLED: 'true' }]) {
+    const context = { exports: {}, process: { env } };
+    vm.runInNewContext(source, context);
+    assert.equal(context.exports.config.env.NEXT_PUBLIC_MERCADOPAGO_ENABLED, 'false');
+  }
+  const context = { exports: {}, process: { env: { VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'feature/mercado-pago' } } };
+  vm.runInNewContext(source, context);
+  assert.equal(context.exports.config.env, undefined);
+});
+
 const productId = '11111111-1111-4111-8111-111111111111';
 function loadCheckout({ stock = 5, testSeller = true, redirectUrl = 'https://www.mercadopago.com.ar/checkout/test' } = {}) {
   const saved = [];

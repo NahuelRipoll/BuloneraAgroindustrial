@@ -1,5 +1,7 @@
 # Mercado Pago: entorno de pruebas
 
+Actualización del 30/10/2026: se autoriza integrar el código en `master` con Mercado Pago deshabilitado. `next.config.ts` fuerza la bandera pública a `false` en Vercel Production o rama `master`; `paymentConfig()` bloquea también las operaciones del servidor en esos entornos, aunque haya una bandera habilitada por error. Las pruebas permanecen en el preview de `feature/mercado-pago`. Esta integración no habilita cobros reales.
+
 La rama `feature/mercado-pago` implementa Checkout Pro mediante la API de preferencias. Los pagos están deshabilitados por defecto. Habilitarlos solamente en el preview de Vercel de esta rama. Se puede utilizar el Supabase actual: el checkout lee el catálogo y guarda las compras simuladas en tablas separadas de las ventas reales. Se comparte infraestructura y credenciales; no es un entorno completamente independiente.
 
 ## Preparar el entorno
@@ -40,7 +42,7 @@ Esta entrega es exclusivamente para pruebas. En este flujo se observó que Check
 
 No reserva ni descuenta stock; comprueba disponibilidad al iniciar el pago. Antes de admitir cobros reales hay que implementar reservas y conciliación, resolver pagos duplicados de una preferencia, reintegros y contracargos, datos del comprador, condiciones de entrega y costos de envío, límites de solicitudes y recuperación automática de pagos sin retorno/webhook. Las compras de prueba no se escriben en `orders` ni `order_items` y no aparecen en las analíticas de ventas reales.
 
-El carrito se conserva al volver para evitar borrar productos agregados en otra pestaña. Aplicar la migración una sola vez. Publicar la rama genera un preview; no fusionarla con `master` para probar la integración.
+El carrito se conserva al volver para evitar borrar productos agregados en otra pestaña. Aplicar la migración una sola vez. Publicar la rama genera un preview; usar ese preview para probar la integración. En `master` y Production los pagos quedan bloqueados por código.
 
 Documentación oficial:
 
