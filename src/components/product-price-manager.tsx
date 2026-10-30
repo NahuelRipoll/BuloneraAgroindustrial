@@ -10,7 +10,7 @@ import { formatCurrency } from "@/lib/format";
 type Product = LocalProductDraft & { image: string };
 const methods = [["pdf", "Listado PDF"], ["archivo", "Excel / CSV"], ["pegar", "Pegar precios"], ["porcentaje", "Porcentaje"], ["manual", "Grilla manual"]] as const;
 
-export function ProductPriceManager({ products: allProducts, disabled, onSave, onBusyChange }: { products: Product[]; disabled: boolean; onSave: (products: Product[], progress: (message: string) => void) => Promise<string[]>; onBusyChange: (busy: boolean) => void }) {
+export function ProductPriceManager({ products: allProducts, disabled, onSave, onBusyChange }: { products: Product[]; disabled: boolean; onSave: (products: Product[], progress: (message: string) => void, imported: boolean) => Promise<string[]>; onBusyChange: (busy: boolean) => void }) {
   const products = useMemo(() => allProducts.filter((product) => Boolean(product.remoteId)), [allProducts]);
   const [method, setMethod] = useState<string>("pdf");
   const [list, setList] = useState<1 | 2 | 3>(1);
@@ -19,6 +19,7 @@ export function ProductPriceManager({ products: allProducts, disabled, onSave, o
   const [brand, setBrand] = useState("");
   const [category, setCategory] = useState("");
   const [search, setSearch] = useState("");
+  const [manualPreview, setManualPreview] = useState(false);
   const [preview, setPreview] = useState<PricePreview | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -40,7 +41,7 @@ export function ProductPriceManager({ products: allProducts, disabled, onSave, o
   const chosen = changes.filter((item) => selected.has(item.key));
   function prepare(inputs: PriceInput[], label: string) {
     const result = buildPricePreview(products, inputs);
-    setPreview(result); setSelected(new Set(result.changes.map((item) => item.key))); setPage(0); setSource(label);
+    setManualPreview(false); setPreview(result); setSelected(new Set(result.changes.map((item) => item.key))); setPage(0); setSource(label);
     setMessage(`${result.changes.length} precios diferentes para revisar. Todavía no se guardó ningún cambio.`);
   }
   async function run(action: () => Promise<void> | void) {
@@ -65,12 +66,12 @@ export function ProductPriceManager({ products: allProducts, disabled, onSave, o
   }
   function manual() {
     const changes: PriceChange[] = products.flatMap((product) => (product.variants?.length ? product.variants.map((variant, index) => ({ ...variant, variantIndex: index })) : [{ ...product, variantIndex: null }]).map((row) => ({ key: `${product.id}:${row.variantIndex ?? "base"}`, productId: product.id, variantIndex: row.variantIndex, sku: row.sku, name: product.name, brand: product.brand, category: product.category, before: row.price, after: row.price })));
-    setPreview({ changes, unchanged: 0, invalid: 0, conflicts: [], unmatched: [] }); setSelected(new Set()); setPage(0); setSource("Edición manual"); setMessage("Editá los precios nuevos; las filas modificadas se seleccionan automáticamente.");
+    setManualPreview(true); setPreview({ changes, unchanged: 0, invalid: 0, conflicts: [], unmatched: [] }); setSelected(new Set()); setPage(0); setSource("Edición manual"); setMessage("Editá los precios nuevos; las filas modificadas se seleccionan automáticamente.");
   }
   async function save() {
     await run(async () => {
-      const next = applyPriceChanges(products, chosen).filter((product) => chosen.some((item) => item.productId === product.id)).map((product) => ({ ...product, image: product.image || "" }));
-      const saved = await onSave(next, setMessage);
+      const next = applyPriceChanges(products, chosen, manualPreview).filter((product) => chosen.some((item) => item.productId === product.id)).map((product) => ({ ...product, image: product.image || "" }));
+      const saved = await onSave(next, setMessage, !manualPreview);
       setPreview((current) => current ? { ...current, changes: current.changes.filter((item) => !saved.includes(item.productId)) } : current);
       setSelected((current) => new Set([...current].filter((key) => !chosen.some((item) => saved.includes(item.productId) && item.key === key))));
       const failed = next.length - saved.length;
@@ -79,7 +80,7 @@ export function ProductPriceManager({ products: allProducts, disabled, onSave, o
   }
   return <section className="card admin-card price-manager">
     <div className="admin-heading"><div><span className="eyebrow">Actualizar sin transcribir</span><h2>Precios del catálogo</h2></div><button className="button-outline" disabled={disabled || busy} onClick={() => downloadCatalogPriceTemplate(products)}>Descargar listado de códigos</button></div>
-    <p>Solo se actualizan códigos de artículos y medidas ya guardados en el catálogo. Los demás se omiten y no se crean artículos nuevos.</p>
+    <p>Solo se actualizan códigos de artículos y medidas ya guardados en el catálogo. Los demás se omiten y no se crean artículos nuevos. Los precios protegidos se excluyen de importaciones y porcentajes; podés editarlos desde Catálogo o Grilla manual.</p>
     <div className="price-methods" role="group" aria-label="Forma de actualizar precios">{methods.map(([id, title]) => <button key={id} aria-pressed={method === id} disabled={busy} onClick={() => { setMethod(id); setError(""); }}>{title}</button>)}</div>
     <fieldset disabled={disabled || busy}>
       {(method === "pdf" || method === "archivo" || method === "pegar") && <p className="admin-notice"><strong>Si falta un precio o no se puede leer:</strong> las filas sin precio, con precio cero o con errores de lectura se excluyen de la revisión y conservan el precio actual del catálogo. Podés corregir el archivo y volver a importarlo, o cargar el precio desde Grilla manual. Si el artículo todavía no tiene precio y el archivo trae uno válido, aparecerá para aplicar.</p>}
@@ -92,6 +93,7 @@ export function ProductPriceManager({ products: allProducts, disabled, onSave, o
     {preview && <>
       <div className="price-review-head"><div><span className="eyebrow">Revisión antes de guardar</span><h3>{source}</h3><p>{changes.length} precios del catálogo para revisar · {preview.unchanged} sin cambios · {preview.unmatched.length} códigos ajenos al catálogo omitidos · {preview.conflicts.length} códigos ambiguos · {preview.invalid} filas inválidas</p></div></div>
       {!changes.length && <p>No hay cambios de precio para aplicar a los artículos del catálogo con este listado.</p>}
+      {Boolean(preview.protectedCodes?.length) && <details><summary>{preview.protectedCodes?.length} códigos protegidos omitidos</summary><p>{preview.protectedCodes?.join(", ")}</p></details>}
       {preview.conflicts.length > 0 && <details className="entry-paste"><summary>Ver códigos del catálogo que requieren revisión</summary><p>Repetidos con distintos precios o ambiguos: {preview.conflicts.join(", ")}</p></details>}
       <fieldset disabled={busy || disabled}>
         <div className="workspace-toolbar"><button className="button-outline" onClick={() => setSelected(new Set(filtered.filter((item) => item.after !== item.before).map((item) => item.key)))}>Seleccionar cambios filtrados</button><button className="button-muted" onClick={() => setSelected(new Set())}>Desmarcar todos</button><span>Transferencia: 10% de descuento sobre el nuevo precio.</span></div>

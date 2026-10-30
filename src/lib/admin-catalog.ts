@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase";
 import type { LocalProductDraft, LocalProductVariant } from "@/lib/local-products";
+import { isPriceImportProtected } from "@/lib/admin-price-preview";
 
 export async function loadAdminCatalog() {
   const db = createSupabaseBrowserClient() as SupabaseClient;
@@ -11,7 +12,7 @@ export async function loadAdminCatalog() {
     for (const row of data) {
       const images = [...(row.product_images ?? [])].sort((a, b) => a.position - b.position).map((image) => image.external_url || (image.storage_path ? db.storage.from("product-images").getPublicUrl(image.storage_path).data.publicUrl : "")).filter(Boolean);
       const variants: LocalProductVariant[] = (row.product_variants ?? []).map((variant) => ({ id: variant.id, sku: variant.sku, diameter: variant.options?.["Diámetro"] ?? "", length: variant.options?.Largo ?? "", pitch: variant.options?.Paso ?? "", price: Number(variant.price), transferPrice: Number(variant.transfer_price), stock: variant.stock }));
-      output.push({ id: row.id, remoteId: row.id, dirty: false, savedPublished: row.published, savedFeatured: row.featured, slug: row.slug, name: row.name, sku: row.sku, brand: row.brand, category: row.category, price: Number(row.price), transferPrice: Number(row.transfer_price), stock: row.stock, image: images[0] ?? "", images, imageStoragePaths: (row.product_images ?? []).map((image) => image.storage_path).filter(Boolean), badge: row.badge ?? "", diameter: row.specs?.["Diámetro"] ?? "", length: row.specs?.Largo ?? "", variants: variants.length ? variants : undefined, published: row.published, featured: row.featured, offerPrice: row.offer_price == null ? 0 : Number(row.offer_price) });
+      output.push({ id: row.id, remoteId: row.id, dirty: false, catalogSpecs: row.specs ?? {}, priceImportProtected: typeof row.specs?.price_import_protected === "boolean" ? row.specs.price_import_protected : isPriceImportProtected(row), savedPublished: row.published, savedFeatured: row.featured, slug: row.slug, name: row.name, sku: row.sku, brand: row.brand, category: row.category, price: Number(row.price), transferPrice: Number(row.transfer_price), stock: row.stock, image: images[0] ?? "", images, imageStoragePaths: (row.product_images ?? []).map((image) => image.storage_path).filter(Boolean), badge: row.badge ?? "", diameter: row.specs?.["Diámetro"] ?? "", length: row.specs?.Largo ?? "", variants: variants.length ? variants : undefined, published: row.published, featured: row.featured, offerPrice: row.offer_price == null ? 0 : Number(row.offer_price) });
     }
     if (data.length < 500) break;
   }

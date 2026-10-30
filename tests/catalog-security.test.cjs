@@ -34,7 +34,7 @@ before(async () => {
     alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
     grant all on storage.objects to anon, authenticated, service_role;
   `);
-  for (const name of ['202609210001_catalog.sql', '202609210002_admin_auth.sql', '202609230001_featured_offers.sql', '202610270001_storefront_gallery.sql', '202610270002_catalog_protection.sql']) {
+  for (const name of ['202609210001_catalog.sql', '202609210002_admin_auth.sql', '202609230001_featured_offers.sql', '202610270001_storefront_gallery.sql', '202610270002_catalog_protection.sql', '202610300001_manual_price_protection.sql']) {
     const sql = readFileSync(`supabase/migrations/${name}`, 'utf8').replace('create extension if not exists pgcrypto;', '');
     await db.exec(sql);
   }
@@ -60,6 +60,42 @@ test('visitantes y usuarios comunes no pueden guardar ni restaurar, ni elevarse 
   await assert.rejects(db.query('truncate public.products cascade'), /permission denied/);
   assert.equal(await scalar('select count(*) from public.catalog_backups'), 0);
   await assert.rejects(db.query('select public.catalog_snapshot()'), /permission denied/);
+});
+
+test('la importación comprueba protección actual y permite seguir editando manualmente', async () => {
+  const update = () => db.query('select public.import_catalog_product_prices($1, $2::jsonb)', [productId, JSON.stringify([{ sku: 'B-M8', before: 100, after: 250 }])]);
+  await as('anon');
+  await assert.rejects(update(), /permission denied/);
+  await as('authenticated', 'cliente@example.com');
+  await assert.rejects(update(), /Acceso denegado/);
+  await as('authenticated', adminEmail);
+  await save(product({ specs: { price_import_protected: true } }));
+  await assert.rejects(update(), /protegido/);
+  assert.equal(await scalar('select price from public.product_variants where id = $1', [variantId]), '100.00');
+  await save(product({ price: 300, specs: { price_import_protected: true } }));
+  assert.equal(await scalar('select price from public.products where id = $1', [productId]), '300.00');
+  await save(product({ specs: { price_import_protected: false, Largo: '30' } }));
+  await update();
+  assert.equal(await scalar('select price from public.products where id = $1', [productId]), '250.00');
+  assert.equal(await scalar('select stock from public.products where id = $1', [productId]), 5);
+  assert.deepEqual(await scalar('select specs from public.products where id = $1', [productId]), { price_import_protected: false, Largo: '30' });
+  assert.equal(await scalar('select count(*) from public.product_images'), 1);
+});
+
+test('el servidor protege excepciones iniciales y revierte importaciones obsoletas o parciales', async () => {
+  await as('authenticated', adminEmail);
+  const update = (changes) => db.query('select public.import_catalog_product_prices($1, $2::jsonb)', [productId, JSON.stringify(changes)]);
+  for (const patch of [{ name: 'FOLIAR COBRA' }, { name: 'Foliares 10L' }, { sku: '2121032' }]) {
+    await save(product(patch));
+    await assert.rejects(update([{ sku: 'B-M8', before: 100, after: 250 }]), /protegido/);
+  }
+  await save();
+  await assert.rejects(update([{ sku: 'B-M8', before: 99, after: 250 }]), /precio cambió/);
+  await assert.rejects(update([{ sku: 'B-M8', before: 100, after: 250 }, { sku: 'INEXISTENTE', before: 100, after: 500 }]), /medida cambió/);
+  assert.equal(await scalar('select price from public.product_variants where id = $1', [variantId]), '100.00');
+  await save(product({ specs: { price_import_protected: false }, name: 'FOLIAR COBRA' }), []);
+  await update([{ sku: 'B-TEST', before: 100, after: 200 }]);
+  assert.equal(await scalar('select price from public.products where id = $1', [productId]), '200.00');
 });
 
 test('un admin puede guardar un producto completo; el público solo ve publicados', async () => {

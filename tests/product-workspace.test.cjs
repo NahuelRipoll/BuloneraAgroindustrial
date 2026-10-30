@@ -10,11 +10,47 @@ function load(file, exports, extra = {}) {
   vm.runInNewContext(source + `\nObject.assign(exports, { ${exports.join(',')} });`, context);
   return context.exports;
 }
-const prices = load('admin-price-preview', ['buildPricePreview', 'percentageInputs', 'applyPriceChanges']);
+const prices = load('admin-price-preview', ['buildPricePreview', 'percentageInputs', 'applyPriceChanges', 'isPriceImportProtected']);
 const entry = load('quick-product-entry', ['blankEntry', 'parseEntryPaste', 'prepareEntryRows', 'entryNumber']);
 const pdf = load('pdf-price-table', ['parsePdfPricePage', 'parsePdfInventoryPage']);
 const imports = load('admin-product-tools', ['groupTemplateVariants', 'parsePriceValue', 'extractPriceRecordsFromRows']);
 const product = (patch = {}) => ({ id: 'one', sku: '00123', name: 'Bulón', brand: 'Marca', category: 'Bulones', price: 100, transferPrice: 90, stock: 10, variants: undefined, ...patch });
+
+test('precios protegidos excluyen productos y medidas, conservando los demás cambios', () => {
+  const protectedProduct = product({ priceImportProtected: true, variants: [{ sku: 'M8', price: 100 }] });
+  const result = prices.buildPricePreview([protectedProduct, product({ id: 'two', sku: 'OTHER' })], [{ sku: 'M8', price: 250 }, { sku: 'OTHER', price: 300 }]);
+  assert.deepEqual(Array.from(result.protectedCodes), ['M8']);
+  assert.equal(result.changes.length, 1);
+  assert.equal(result.changes[0].sku, 'OTHER');
+  assert.equal(result.unmatched.length, 0);
+});
+
+test('la sierra y todos los foliares quedan protegidos hasta desactivar explícitamente', () => {
+  assert.equal(prices.isPriceImportProtected(product({ sku: '2121032' })), true);
+  for (const name of ['3412 FOLIAR MADURADOR', 'Foliares 10 litros']) {
+    assert.equal(prices.isPriceImportProtected(product({ name })), true);
+    assert.equal(prices.isPriceImportProtected(product({ name, priceImportProtected: false })), false);
+  }
+  assert.equal(prices.isPriceImportProtected(product()), false);
+});
+
+test('la protección administrativa no aparece en la ficha técnica pública', () => {
+  const storefront = load('supabase-products', ['mapProductRows']);
+  const rows = [{ id: 'one', sku: '00123', name: 'Bulón', price: 100, transfer_price: 90, specs: { price_import_protected: true, Largo: '30' }, product_images: [], product_variants: [] }];
+  const result = storefront.mapProductRows(rows, {});
+  assert.deepEqual(Object.keys(result[0].specs), ['Largo']);
+  assert.equal(result[0].specs.Largo, '30');
+});
+
+test('una revisión anterior no puede modificar protegidos pero la edición manual sí', () => {
+  const original = product();
+  const preview = prices.buildPricePreview([original], [{ sku: original.sku, price: 250 }]);
+  const protectedProduct = { ...original, priceImportProtected: true };
+  assert.throws(() => prices.applyPriceChanges([protectedProduct], preview.changes), /protegido/);
+  const manual = prices.applyPriceChanges([protectedProduct], preview.changes, true)[0];
+  assert.equal(manual.price, 250);
+  assert.equal(manual.priceImportProtected, true);
+});
 
 test('los códigos mantienen sus ceros y no se confunden con códigos parecidos', () => {
   const result = prices.buildPricePreview([product()], [{ sku: '123', price: 500 }, { sku: '00123', price: 200 }]);
@@ -103,8 +139,14 @@ test('la carga administrativa recorre páginas más allá del límite de Supabas
   const ranges = [];
   const rows = Array.from({ length: 1001 }, (_, index) => ({ id: `id-${index}`, slug: `p-${index}`, sku: `sku-${index}`, name: `Producto ${index}`, price: 100, transfer_price: 90, stock: 1, specs: {}, product_images: [], product_variants: [] }));
   const fake = { from: () => ({ select: () => ({ order: () => ({ range: async (start, end) => { ranges.push([start, end]); return { data: rows.slice(start, end + 1), error: null }; } }) }) }) };
-  const catalog = load('admin-catalog', ['loadAdminCatalog', 'mergeAdminDrafts'], { createSupabaseBrowserClient: () => fake });
-  assert.equal((await catalog.loadAdminCatalog()).length, 1001);
+  rows[0].name = 'FOLIAR MADURADOR';
+  rows[1].specs = { price_import_protected: true, Detalle: 'Conservar' };
+  const catalog = load('admin-catalog', ['loadAdminCatalog', 'mergeAdminDrafts'], { createSupabaseBrowserClient: () => fake, isPriceImportProtected: prices.isPriceImportProtected });
+  const loaded = await catalog.loadAdminCatalog();
+  assert.equal(loaded.length, 1001);
+  assert.equal(loaded.find(p => p.id === 'id-0').priceImportProtected, true);
+  assert.equal(loaded.find(p => p.id === 'id-1').priceImportProtected, true);
+  assert.equal(loaded.find(p => p.id === 'id-1').catalogSpecs.Detalle, 'Conservar');
   assert.deepEqual(ranges, [[0, 499], [500, 999], [1000, 1499]]);
   const result = catalog.mergeAdminDrafts([{ ...product(), remoteId: 'one' }], [{ ...product({ price: 200, dirty: true }), remoteId: 'one' }]);
   assert.equal(result[0].price, 200);

@@ -14,6 +14,8 @@ export type LocalProductDraft = {
   brand: string;
   category: string;
   price: number;
+  priceImportProtected?: boolean;
+  catalogSpecs?: Record<string, unknown>;
   transferPrice: number;
   stock: number;
   image?: string;

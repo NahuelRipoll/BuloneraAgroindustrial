@@ -12,7 +12,7 @@ import { ProductQuickEntry } from "@/components/product-quick-entry";
 import { ProductPriceManager } from "@/components/product-price-manager";
 import { ProductPhotoManager } from "@/components/product-photo-manager";
 import { loadAdminCatalog, mergeAdminDrafts } from "@/lib/admin-catalog";
-import { applyPriceChanges, buildPricePreview, percentageInputs } from "@/lib/admin-price-preview";
+import { applyPriceChanges, buildPricePreview, percentageInputs, isPriceImportProtected } from "@/lib/admin-price-preview";
 
 import { optimizeImage, rowToProduct, parseDelimited, decimal, transferFromPrice, slugify, parsePriceValue, readPriceRecordsFromFile, parsePricePasteText, buildPriceLookup, findPriceInLookup, downloadProductMeasureTemplate, groupErpVariants, groupTemplateVariants } from "@/lib/admin-product-tools";
 
@@ -265,7 +265,7 @@ export function ProductAdmin() {
       }
       const variants = (draft.variants ?? []).map((variant) => ({ ...variant, id: variant.id || crypto.randomUUID() }));
       const { data: productId, error } = await db.rpc("save_catalog_product", {
-        p_product: { id: draft.remoteId || uploadFolder, slug: draft.slug, name: draft.name, sku: draft.sku, brand: draft.brand, category: draft.category, price: effectivePrice, transfer_price: effectiveTransferPrice, stock: draft.stock, badge: draft.badge || null, specs: { ...(draft.diameter ? { "Diámetro": draft.diameter } : {}), ...(draft.length ? { Largo: draft.length } : {}) }, published: draft.published, featured: draft.featured, offer_price: draft.offerPrice || null },
+        p_product: { id: draft.remoteId || uploadFolder, slug: draft.slug, name: draft.name, sku: draft.sku, brand: draft.brand, category: draft.category, price: effectivePrice, transfer_price: effectiveTransferPrice, stock: draft.stock, badge: draft.badge || null, specs: { ...draft.catalogSpecs, price_import_protected: isPriceImportProtected(draft), ...(draft.diameter ? { "Diámetro": draft.diameter } : {}), ...(draft.length ? { Largo: draft.length } : {}) }, published: draft.published, featured: draft.featured, offer_price: draft.offerPrice || null },
         p_variants: variants.map((variant) => ({ id: variant.id, sku: variant.sku, options: { ...(variant.diameter ? { Diámetro: variant.diameter } : {}), ...(variant.pitch ? { Paso: variant.pitch } : {}), ...(variant.length ? { Largo: variant.length } : {}) }, price: variant.price || draft.price, transfer_price: variant.transferPrice || effectiveTransferPrice, stock: variant.stock })),
         p_images: rows,
       });
@@ -325,6 +325,10 @@ export function ProductAdmin() {
   }
 
   async function handleModalFilePrices(event: ChangeEvent<HTMLInputElement>, item: DraftProduct) {
+    if (isPriceImportProtected(item)) {
+      event.target.value = "";
+      setNotice("Precio protegido: editá los valores manualmente o desactivá la protección antes de importar."); return;
+    }
     const file = event.target.files?.[0];
     if (!file) return;
     try {
@@ -356,6 +360,9 @@ export function ProductAdmin() {
   }
 
   function handleModalPastePrices(item: DraftProduct) {
+    if (isPriceImportProtected(item)) {
+      setNotice("Precio protegido: editá los valores manualmente o desactivá la protección antes de pegar precios."); return;
+    }
     const text = modalPricePaste.trim();
     if (!text) return;
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -446,6 +453,9 @@ export function ProductAdmin() {
   }
 
   function handleModalAdjustPercent(item: DraftProduct) {
+    if (isPriceImportProtected(item)) {
+      setNotice("Precio protegido: editá los valores manualmente o desactivá la protección antes de ajustar porcentajes."); return;
+    }
     const factor = 1 + modalVariantPercent / 100;
     let adjusted = 0;
     const updatedVariants = (item.variants ?? []).map((v) => {
@@ -473,6 +483,35 @@ export function ProductAdmin() {
     for (const item of selected) if (await saveToSupabase(item)) saved++;
     setBulkSaving(false);
     setNotice(`${saved} productos guardados.${saved < selected.length ? ` ${selected.length - saved} no se guardaron; abrí uno y guardalo para revisar el error.` : ""}`);
+  }
+
+  async function saveImportedPrices(items: DraftProduct[], progress: (message: string) => void) {
+    if (bulkSaving || !cloudReady) return [];
+    setBulkSaving(true);
+    const saved: string[] = [], failures: string[] = [];
+    try {
+      const db: any = createSupabaseBrowserClient();
+      for (const item of items) {
+        const current = drafts.find((draft) => draft.id === item.id);
+        if (!current?.remoteId || isPriceImportProtected(current)) {
+          failures.push(`${item.sku}: precio protegido o artículo no guardado.`); continue;
+        }
+        const changes = item.variants?.length ? item.variants.flatMap((variant, index) => {
+          const previous = current.variants?.[index];
+          return previous && previous.sku === variant.sku && previous.price !== variant.price ? [{ sku: variant.sku, before: previous.price, after: variant.price }] : [];
+        }) : [{ sku: item.sku, before: current.price, after: item.price }];
+        progress(`Guardando precios de ${item.name}…`);
+        const { error } = await db.rpc("import_catalog_product_prices", { p_product_id: current.remoteId, p_changes: changes });
+        if (error) {
+          failures.push(`${item.sku}: ${error.code === "PGRST202" ? "Falta aplicar la migración de protección de precios en Supabase." : error.message}`);
+          continue;
+        }
+        setDrafts((previous) => previous.map((draft) => draft.id === item.id ? { ...draft, price: item.price, transferPrice: item.transferPrice, variants: item.variants } : draft));
+        saved.push(item.id);
+      }
+      setNotice(failures.length ? `${saved.length} artículos actualizados. ${failures.join(" · ")}` : `${saved.length} artículos actualizados. Se conservaron stock, fotos y datos del catálogo.`);
+      return saved;
+    } finally { setBulkSaving(false); }
   }
 
   async function saveProductBatch(items: DraftProduct[], progress: (message: string) => void = setNotice, stageDrafts = true) {
@@ -549,7 +588,7 @@ export function ProductAdmin() {
     {!loadingCloud && !cloudReady && <p role="alert" className="admin-notice">No se pudo cargar el catálogo. Recargá la página antes de guardar o importar artículos.</p>}
     {!activeModule && <div className="product-module-grid">{productModules.map((item, index) => <Link className="product-module-card" key={item.id} href={`/admin/productos/${item.id}`}><span className="module-number">0{index + 1}</span><h2>{item.title}</h2><p>{item.description}</p><strong>{item.action} →</strong></Link>)}</div>}
     <div hidden={module !== "carga"}><ProductQuickEntry products={drafts} disabled={!cloudReady || workspaceBusy} onCreate={addQuickProducts} /></div>
-    <div hidden={module !== "precios"}><ProductPriceManager products={drafts} disabled={!cloudReady || bulkSaving || savingOffers} onSave={saveProductBatch} onBusyChange={setChildBusy} /></div>
+    <div hidden={module !== "precios"}><ProductPriceManager products={drafts} disabled={!cloudReady || bulkSaving || savingOffers} onSave={(items, progress, imported) => imported ? saveImportedPrices(items, progress) : saveProductBatch(items, progress)} onBusyChange={setChildBusy} /></div>
     <div hidden={module !== "fotos"}><ProductPhotoManager products={drafts} disabled={!cloudReady || bulkSaving || savingOffers} onSave={(items, progress) => saveProductBatch(items, progress, false)} onBusyChange={setChildBusy} /></div>
     {(module === "carga" || module === "importar") && pendingCloudSaveIds.length > 0 && <div className="workspace-savebar"><span><strong>{pendingCloudSaveIds.length}</strong> artículos del lote pendientes de guardar. También podés completarlos desde Catálogo.</span><button className="button" disabled={workspaceBusy || !cloudReady} onClick={() => void saveProductBatch(drafts.filter((item) => pendingCloudSaveIds.includes(item.id)))}>Guardar lote pendiente</button></div>}
     {module === "importar" && <>
@@ -607,7 +646,7 @@ export function ProductAdmin() {
       {dirtyDrafts.length > 0 && <div className="workspace-toolbar"><span>{dirtyDrafts.length} artículos tienen cambios sin guardar.</span><button className="link-button" disabled={workspaceBusy || !cloudReady} onClick={() => void discardPending()}>Descartar todos los pendientes</button></div>}
       <p className="offer-results-count">{filteredDrafts.length} resultados</p>
       {drafts.length ? <div className="admin-table-wrap"><table className="admin-table editable-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar esta página" checked={visibleDrafts.length > 0 && visibleDrafts.every((item) => selectedProductIds.includes(item.id))} onChange={(event) => setSelectedProductIds((current) => event.target.checked ? [...new Set([...current, ...visibleDrafts.map((item) => item.id)])] : current.filter((id) => !visibleDrafts.some((item) => item.id === id)))} /></th><th>Foto</th><th>SKU</th><th>Artículo</th><th>Marca</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Publicar</th><th></th></tr></thead><tbody>
-        {visibleDrafts.map((item) => { const images = [...new Set([...(item.images ?? []), item.image].filter(Boolean))]; return <tr key={item.id}><td><input type="checkbox" aria-label={`Seleccionar ${item.name}`} checked={selectedProductIds.includes(item.id)} onChange={() => toggleProductSelection(item.id)} /></td><td><img className="admin-product-thumb" src={images[0] || "/imagenes/producto-sin-foto.svg"} alt="" /></td><td>{item.sku}{(item.dirty || !item.remoteId) && <small className="pending-product-label">Sin guardar</small>}</td><td className="editable-name"><input className="title-input" value={item.name} aria-label={`Título de ${item.sku}`} onChange={(event) => patchDraft(item.id, { name: event.target.value })} /></td><td><input value={item.brand} onChange={(event) => patchDraft(item.id, { brand: event.target.value })} /></td><td><input value={item.category} onChange={(event) => patchDraft(item.id, { category: event.target.value })} /></td><td><input className="price-input" type="number" min="0" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input className="stock-input" type="number" min="0" value={item.stock} disabled={Boolean(item.variants?.length)} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></td><td><input type="checkbox" checked={item.published} onChange={(event) => patchDraft(item.id, { published: event.target.checked })} /></td><td><div className="table-actions"><button className="icon-button" disabled={workspaceBusy || !cloudReady || (!item.dirty && Boolean(item.remoteId))} onClick={() => void saveToSupabase(item)} aria-label={`Guardar ${item.sku}`}><Save size={17} /></button><button className="icon-button" onClick={() => setEditingId(editingId === item.id ? null : item.id)} aria-label="Editar"><Pencil size={17} /></button><button className="icon-button danger" disabled={deletingIds.includes(item.id)} onClick={() => deleteProduct(item)} aria-label="Eliminar producto"><Trash2 size={17} /></button></div></td></tr>})}
+        {visibleDrafts.map((item) => { const images = [...new Set([...(item.images ?? []), item.image].filter(Boolean))]; return <tr key={item.id}><td><input type="checkbox" aria-label={`Seleccionar ${item.name}`} checked={selectedProductIds.includes(item.id)} onChange={() => toggleProductSelection(item.id)} /></td><td><img className="admin-product-thumb" src={images[0] || "/imagenes/producto-sin-foto.svg"} alt="" /></td><td>{item.sku}{(item.dirty || !item.remoteId) && <small className="pending-product-label">Sin guardar</small>}</td><td className="editable-name"><input className="title-input" value={item.name} aria-label={`Título de ${item.sku}`} onChange={(event) => patchDraft(item.id, { name: event.target.value })} /></td><td><input value={item.brand} onChange={(event) => patchDraft(item.id, { brand: event.target.value })} /></td><td><input value={item.category} onChange={(event) => patchDraft(item.id, { category: event.target.value })} /></td><td><label><input type="checkbox" aria-label={`Excluir de importaciones de precios ${item.sku}`} checked={isPriceImportProtected(item)} onChange={(event) => patchDraft(item.id, { priceImportProtected: event.target.checked })} /> Precio manual</label><input className="price-input" type="number" min="0" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></td><td><input className="stock-input" type="number" min="0" value={item.stock} disabled={Boolean(item.variants?.length)} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></td><td><input type="checkbox" checked={item.published} onChange={(event) => patchDraft(item.id, { published: event.target.checked })} /></td><td><div className="table-actions"><button className="icon-button" disabled={workspaceBusy || !cloudReady || (!item.dirty && Boolean(item.remoteId))} onClick={() => void saveToSupabase(item)} aria-label={`Guardar ${item.sku}`}><Save size={17} /></button><button className="icon-button" onClick={() => setEditingId(editingId === item.id ? null : item.id)} aria-label="Editar"><Pencil size={17} /></button><button className="icon-button danger" disabled={deletingIds.includes(item.id)} onClick={() => deleteProduct(item)} aria-label="Eliminar producto"><Trash2 size={17} /></button></div></td></tr>})}
       </tbody></table></div> : <p>Todavía no hay borradores.</p>}
       <div className="workspace-pagination"><button className="button-outline" disabled={currentCatalogPage === 0} onClick={() => setCatalogPage(currentCatalogPage - 1)}>Anterior</button><span>{filteredDrafts.length} resultados · Página {currentCatalogPage + 1} de {catalogPages}</span><button className="button-outline" disabled={currentCatalogPage + 1 >= catalogPages} onClick={() => setCatalogPage(currentCatalogPage + 1)}>Siguiente</button><label>Por página<select value={catalogPageSize} onChange={(event) => setCatalogPageSize(Number(event.target.value))}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label></div>
       {editingId && drafts.find((draft) => draft.id === editingId) ? (() => {
@@ -624,7 +663,7 @@ export function ProductAdmin() {
         return <div className="product-editor-backdrop" onMouseDown={() => setEditingId(null)}><div className="product-editor" role="dialog" aria-modal="true" aria-label={`Editar ${item.name}`} onMouseDown={(event) => event.stopPropagation()}>
         <div className="editor-head"><div><span className="eyebrow">Editar producto</span><h3>{item.name}</h3></div><button className="icon-button" onClick={() => setEditingId(null)} aria-label="Cerrar"><X size={18} /></button></div>
         <div className="product-form compact-form"><label className="wide">Título del artículo<input required value={item.name} onChange={(event) => patchDraft(item.id, { name: event.target.value })} /></label><label>Precio base {item.variants?.length ? "(opcional)" : ""}<input min="1" type="number" value={item.price || ""} onChange={(event) => { const price = Number(event.target.value); patchDraft(item.id, { price, transferPrice: transferFromPrice(price) }); }} /></label><label>Transferencia base<input min="1" type="number" value={item.transferPrice || ""} onChange={(event) => patchDraft(item.id, { transferPrice: Number(event.target.value) })} /></label><label>Stock total<input min="0" type="number" disabled={Boolean(item.variants?.length)} value={item.stock} onChange={(event) => patchDraft(item.id, { stock: Number(event.target.value) })} /></label><label>Etiqueta<input value={item.badge} onChange={(event) => patchDraft(item.id, { badge: event.target.value })} /></label></div>
-        <div className="workspace-toolbar"><button className="button-outline" disabled={savingIds.includes(item.id)} onClick={() => addVariant(item)}>+ Agregar medida</button></div>
+        <label className="admin-notice"><input type="checkbox" checked={isPriceImportProtected(item)} onChange={(event) => patchDraft(item.id, { priceImportProtected: event.target.checked })} /> Excluir de importaciones de precios</label><p>Conserva los precios del artículo y todas sus medidas al importar o ajustar por porcentaje. Podés editarlos manualmente. Guardá el producto para conservar esta elección.</p><div className="workspace-toolbar"><button className="button-outline" disabled={savingIds.includes(item.id)} onClick={() => addVariant(item)}>+ Agregar medida</button></div>
         {item.variants?.length ? <div className="variant-editor">
           <div className="variant-editor-header">
             <div>

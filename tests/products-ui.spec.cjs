@@ -45,6 +45,18 @@ async function setup(page, { failSku, existingPhoto = false, failGallerySave = f
       return route.fulfill({ json: { Key: url.pathname.split('/object/')[1] } });
     }
     if (url.pathname.startsWith('/storage/v1/object/public/product-images/') && request.method() === 'GET') return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XkAAAAASUVORK5CYII=', 'base64') });
+    if (url.pathname.endsWith('/rpc/import_catalog_product_prices')) {
+      const body = request.postDataJSON(); writes.push(body);
+      const product = products.find(item => item.id === body.p_product_id);
+      if (product.sku === failSku) { failSku = null; return route.fulfill({ status: 500, json: { message: 'Fallo de guardado simulado' } }); }
+      if (product.specs.price_import_protected) return route.fulfill({ status: 400, json: { message: 'Precio protegido' } });
+      for (const change of body.p_changes) {
+        const target = product.product_variants.length ? product.product_variants.find(v => v.sku === change.sku) : product;
+        target.price = change.after; target.transfer_price = Math.round(change.after * 90) / 100;
+      }
+      if (product.product_variants.length) product.price = Math.min(...product.product_variants.map(v => v.price));
+      return route.fulfill({ json: product.id });
+    }
     if (url.pathname.endsWith('/rpc/save_catalog_product')) {
       const body = request.postDataJSON(); writes.push(body);
       if (body.p_product.sku === failSku) { failSku = null; return route.fulfill({ status: 500, json: { code: 'P0001', message: 'Fallo de guardado simulado' } }); }
@@ -99,6 +111,35 @@ test('edición pendiente y ajustes de medidas sobreviven a la navegación entre 
   expect(errors).toEqual([]);
 });
 
+test('la protección persiste y excluye precios sin impedir su edición manual', async ({ page }) => {
+  const { writes, errors } = await setup(page);
+  await page.goto('/admin/productos/catalogo');
+  const protection = page.getByRole('checkbox', { name: 'Excluir de importaciones de precios 2120289', exact: true });
+  await protection.check();
+  await page.getByRole('button', { name: 'Guardar 2120289', exact: true }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0].p_product.specs.price_import_protected).toBe(true);
+  await page.reload();
+  await expect(protection).toBeChecked();
+  await page.getByRole('link', { name: 'Precios', exact: true }).click();
+  await page.getByRole('button', { name: 'Pegar precios', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Listado de códigos y precios' }).fill('2120289\t250\n2121126\t350');
+  await page.getByRole('button', { name: 'Revisar coincidencias' }).click();
+  await expect(page.locator('.price-review-table tbody tr')).toHaveCount(1);
+  await expect(page.getByText('1 códigos protegidos omitidos', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Guardar precios seleccionados' }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1].p_product_id).toBe(secondId);
+  await page.getByRole('button', { name: 'Grilla manual', exact: true }).click();
+  await page.getByRole('button', { name: 'Abrir grilla de precios' }).click();
+  await page.getByRole('spinbutton', { name: 'Nuevo precio de 2120289', exact: true }).fill('275');
+  await page.getByRole('button', { name: 'Guardar precios seleccionados' }).click();
+  await expect.poll(() => writes.length).toBe(3);
+  expect(writes[2].p_product.price).toBe(275);
+  expect(writes[2].p_product.specs.price_import_protected).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test('precios: solo revisa y guarda coincidencias del catálogo', async ({ page }) => {
   const { writes, errors } = await setup(page);
   await page.goto('/admin/productos/precios');
@@ -114,9 +155,9 @@ test('precios: solo revisa y guarda coincidencias del catálogo', async ({ page 
   await page.getByRole('button', { name: 'Guardar precios seleccionados' }).click();
   await expect(page.getByText('2 artículos guardados.', { exact: true }).first()).toBeVisible();
   expect(writes).toHaveLength(2);
-  expect(writes.map(item => item.p_product.id).sort()).toEqual([firstId, secondId].sort());
-  expect(writes.find(item => item.p_product.id === firstId).p_product.price).toBe(250);
-  expect(writes.find(item => item.p_product.id === secondId).p_variants[0].price).toBe(350);
+  expect(writes.map(item => item.p_product_id).sort()).toEqual([firstId, secondId].sort());
+  expect(writes.find(item => item.p_product_id === firstId).p_changes[0].after).toBe(250);
+  expect(writes.find(item => item.p_product_id === secondId).p_changes[0].after).toBe(350);
   await page.locator('input[type="file"][accept=".xlsx,.csv"]').setInputFiles({
     name: 'sin-coincidencias.csv', mimeType: 'text/csv', buffer: Buffer.from('Código;Precio\nAJENO;500'),
   });
@@ -369,7 +410,6 @@ test('Excel y CSV convertidos permiten elegir lista sin cambiar existencias', as
   expect(writes.length).toBe(0);
   await page.getByRole('button', { name: 'Guardar precios seleccionados' }).click();
   await expect.poll(() => writes.length).toBe(2);
-  expect(writes.find((write) => write.p_product.sku === '2120289').p_product.stock).toBe(5);
-  expect(writes.find((write) => write.p_product.sku === 'GRP-BULON').p_variants[0].stock).toBe(10);
+  expect(writes.every(write => Object.keys(write).sort().join(',') === 'p_changes,p_product_id')).toBe(true);
   expect(errors).toEqual([]);
 });

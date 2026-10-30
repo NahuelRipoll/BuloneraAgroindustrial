@@ -20,7 +20,7 @@ function mapProductRows(rows: ProductRow[], supabase: ReturnType<typeof createSu
       const price = offerPrice ? Math.round(baseVariantPrice * offerRatio) : baseVariantPrice;
       return { id: variant.id, sku: variant.sku, options: variant.options ?? {}, price, listPrice: offerPrice ? baseVariantPrice : undefined, transferPrice: offerPrice ? Math.round(price * .9) : Number(variant.transfer_price), stock: variant.stock };
     });
-    return { id: row.id, slug: row.slug, name: row.name, sku: row.sku, brand: row.brand, category: row.category, price: offerPrice ?? basePrice, listPrice: offerPrice ? basePrice : row.list_price == null ? undefined : Number(row.list_price), transferPrice: offerPrice ? Math.round(offerPrice * .9) : Number(row.transfer_price), stock: row.stock, badge: row.badge ?? undefined, featured: row.featured, offerPrice, image: images[0] || "/imagenes/producto-sin-foto.svg", images, specs: row.specs ?? {}, variants: variants.length ? variants : undefined };
+    return { id: row.id, slug: row.slug, name: row.name, sku: row.sku, brand: row.brand, category: row.category, price: offerPrice ?? basePrice, listPrice: offerPrice ? basePrice : row.list_price == null ? undefined : Number(row.list_price), transferPrice: offerPrice ? Math.round(offerPrice * .9) : Number(row.transfer_price), stock: row.stock, badge: row.badge ?? undefined, featured: row.featured, offerPrice, image: images[0] || "/imagenes/producto-sin-foto.svg", images, specs: Object.fromEntries(Object.entries(row.specs ?? {}).filter(([key]) => key !== "price_import_protected")), variants: variants.length ? variants : undefined };
   });
 }
 
