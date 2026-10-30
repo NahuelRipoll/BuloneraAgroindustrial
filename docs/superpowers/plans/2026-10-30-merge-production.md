@@ -6,7 +6,9 @@
 
 - [x] Verificar ambos bloqueos con pruebas de configuración y pagos, incluyendo una bandera habilitada por error.
 - [x] Ejecutar pruebas y build con entorno Production simulado; comprobar carrito sin botón y checkout bloqueado. Evidencia: 63 pruebas, build correcto, comprobación en navegador con cero botones de Mercado Pago y HTTP 503 del checkout.
-- [ ] Guardar cambios específicos, integrar master actualizado mediante fast-forward y subir master. Conservar archivos de datos locales sin incluirlos.
-- [ ] Verificar publicación en bagroindustrial.com: versión actualizada y Mercado Pago deshabilitado. Informar cualquier limitación de verificación.
+- [x] Guardar cambios específicos, integrar master actualizado mediante fast-forward y subir master. Conservar archivos de datos locales sin incluirlos.
+- [x] Verificar publicación en bagroindustrial.com: versión actualizada y Mercado Pago deshabilitado. Informar cualquier limitación de verificación.
 
 No se cambian secretos ni se habilitan cobros. La migración más reciente fue ejecutada por el usuario. Las migraciones anteriores ya se utilizaron en el mismo proyecto Supabase durante las pruebas del administrador.
+
+Verificación remota completada el 30/10/2026: https://www.bagroindustrial.com/tienda responde correctamente; favicon SHA-256 idéntico al logo enviado; carrito con cero botones de Mercado Pago; POST vacío a /api/checkout devuelve HTTP 503. GitHub informa Deployment has completed para el commit 297c921. No se crearon pedidos ni se modificaron precios o stock durante estas comprobaciones.
