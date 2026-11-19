@@ -233,9 +233,10 @@ export function ProductAdmin() {
   async function saveToSupabase(draft: DraftProduct) {
     if (!cloudReady) { setNotice("Esperá a que se cargue el catálogo antes de guardar."); return false; }
     if (productOperations.current.has(draft.id)) return false;
+    const name = draft.name.trim().toUpperCase();
     const variantSkus = (draft.variants || []).map((variant) => variant.sku.trim().toLowerCase());
     const otherCodes = new Set(drafts.filter((item) => item.id !== draft.id).flatMap((item) => [item.sku, ...(item.variants || []).map((variant) => variant.sku)]).map((sku) => sku.trim().toLowerCase()));
-    if (!draft.name.trim() || !draft.sku.trim() || variantSkus.some((sku) => !sku || otherCodes.has(sku)) || new Set(variantSkus).size !== variantSkus.length || otherCodes.has(draft.sku.trim().toLowerCase())) {
+    if (!name || !draft.sku.trim() || variantSkus.some((sku) => !sku || otherCodes.has(sku)) || new Set(variantSkus).size !== variantSkus.length || otherCodes.has(draft.sku.trim().toLowerCase())) {
       setNotice("Completá nombre y códigos únicos. Hay un código vacío o repetido en el catálogo o entre las medidas."); return false;
     }
     const pendingUrl = editingId === draft.id ? imageUrl.trim() : "";
@@ -260,19 +261,19 @@ export function ProductAdmin() {
           const path = `${uploadFolder}/${crypto.randomUUID()}.jpg`;
           const { error: uploadError } = await supabase.storage.from("product-images").upload(path, blob, { contentType: "image/jpeg" });
           if (uploadError) throw uploadError;
-          rows.push({ storage_path: path, external_url: null, alt_text: draft.name });
-        } else rows.push({ storage_path: null, external_url: source, alt_text: draft.name });
+          rows.push({ storage_path: path, external_url: null, alt_text: name });
+        } else rows.push({ storage_path: null, external_url: source, alt_text: name });
       }
       const variants = (draft.variants ?? []).map((variant) => ({ ...variant, id: variant.id || crypto.randomUUID() }));
       const { data: productId, error } = await db.rpc("save_catalog_product", {
-        p_product: { id: draft.remoteId || uploadFolder, slug: draft.slug, name: draft.name, sku: draft.sku, brand: draft.brand, category: draft.category, price: effectivePrice, transfer_price: effectiveTransferPrice, stock: draft.stock, badge: draft.badge || null, specs: { ...draft.catalogSpecs, price_import_protected: isPriceImportProtected(draft), ...(draft.diameter ? { "Diámetro": draft.diameter } : {}), ...(draft.length ? { Largo: draft.length } : {}) }, published: draft.published, featured: draft.featured, offer_price: draft.offerPrice || null },
+        p_product: { id: draft.remoteId || uploadFolder, slug: draft.slug, name, sku: draft.sku, brand: draft.brand, category: draft.category, price: effectivePrice, transfer_price: effectiveTransferPrice, stock: draft.stock, badge: draft.badge || null, specs: { ...draft.catalogSpecs, price_import_protected: isPriceImportProtected(draft), ...(draft.diameter ? { "Diámetro": draft.diameter } : {}), ...(draft.length ? { Largo: draft.length } : {}) }, published: draft.published, featured: draft.featured, offer_price: draft.offerPrice || null },
         p_variants: variants.map((variant) => ({ id: variant.id, sku: variant.sku, options: { ...(variant.diameter ? { Diámetro: variant.diameter } : {}), ...(variant.pitch ? { Paso: variant.pitch } : {}), ...(variant.length ? { Largo: variant.length } : {}) }, price: variant.price || draft.price, transfer_price: variant.transferPrice || effectiveTransferPrice, stock: variant.stock })),
         p_images: rows,
       });
       if (error) throw new Error(error.code === "PGRST202" ? "Falta aplicar la migración de permisos y respaldos en Supabase para guardar productos." : error.message);
       const savedImages = rows.map((row) => row.storage_path ? supabase.storage.from("product-images").getPublicUrl(row.storage_path).data.publicUrl : row.external_url!);
-      patchDraft(draft.id, { remoteId: productId, variants: variants.length ? variants : undefined, images: savedImages, image: savedImages[0] ?? "", savedPublished: draft.published, savedFeatured: draft.featured, price: effectivePrice, transferPrice: effectiveTransferPrice, imageStoragePaths: rows.map((row) => row.storage_path).filter((path): path is string => Boolean(path)) }, false);
-      setNotice(`${draft.name} quedó guardado en Supabase${draft.published ? " y publicado en la tienda" : " como borrador"}.`);
+      patchDraft(draft.id, { name, remoteId: productId, variants: variants.length ? variants : undefined, images: savedImages, image: savedImages[0] ?? "", savedPublished: draft.published, savedFeatured: draft.featured, price: effectivePrice, transferPrice: effectiveTransferPrice, imageStoragePaths: rows.map((row) => row.storage_path).filter((path): path is string => Boolean(path)) }, false);
+      setNotice(`${name} quedó guardado en Supabase${draft.published ? " y publicado en la tienda" : " como borrador"}.`);
       return true;
     } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo guardar el producto en Supabase."); return false; }
     finally { productOperations.current.delete(draft.id); setSavingIds((current) => current.filter((id) => id !== draft.id)); }

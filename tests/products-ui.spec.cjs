@@ -87,11 +87,24 @@ test('módulos independientes y carga de varios artículos sin formularios indiv
   await page.getByRole('button', { name: 'Guardar 2 artículos como borradores' }).click();
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[0].p_product.published).toBe(false); expect(writes[0].p_product.price).toBe(1500.5);
+  expect(writes[0].p_product.name).toBe('ARTÍCULO NUEVO UNO');
   await page.getByRole('link', { name: 'Catálogo', exact: true }).click();
   await page.getByPlaceholder('Nombre, SKU o medida').fill('NUEVO-001');
-  await expect(page.getByRole('textbox', { name: 'Título de NUEVO-001' })).toHaveValue('Artículo nuevo uno');
+  await expect(page.getByRole('textbox', { name: 'Título de NUEVO-001' })).toHaveValue('ARTÍCULO NUEVO UNO');
   await page.screenshot({ path: '.next/ui-results/catalogo.png', fullPage: true });
   expect(errors).toEqual([]);
+});
+
+test('el catálogo guarda el título en mayúsculas al editar un producto', async ({ page }) => {
+  const { writes } = await setup(page);
+  await page.goto('/admin/productos/catalogo');
+  const title = page.getByRole('textbox', { name: 'Título de 2120289' });
+  await title.fill('  Llave para cañería  ');
+  await page.getByRole('button', { name: 'Guardar 2120289', exact: true }).click();
+  await expect(title).toHaveValue('LLAVE PARA CAÑERÍA');
+  expect(writes[0].p_product.name).toBe('LLAVE PARA CAÑERÍA');
+  await page.reload();
+  await expect(title).toHaveValue('LLAVE PARA CAÑERÍA');
 });
 
 test('el catálogo permite abrir las fotos sin desplazamiento horizontal', async ({ page }) => {
