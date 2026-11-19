@@ -1365,16 +1365,57 @@ p {
 .bulk-toolbar strong { margin-right: auto; color: white; }
 .bulk-toolbar label { display: flex; align-items: center; gap: 6px; color: white; font-size: 12px; font-weight: 800; }
 .bulk-toolbar input { width: 72px; padding: 8px; color: white; background: var(--bg); border: 1px solid #444; border-radius: 4px; }
-.editable-table input:not([type="checkbox"]) { min-width: 90px; max-width: 155px; padding: 8px 9px; color: white; background: #151515; border: 1px solid #383838; border-radius: 4px; }
-.editable-table .price-input { width: 120px; color: #ffb091; font-weight: 800; }
-.editable-table { min-width: 1600px; }
-.catalog-price-control { display: flex; align-items: center; gap: 12px; min-width: 280px; }
-.catalog-price-control > .price-input { order: -1; flex: 0 0 150px; width: 150px; text-align: right; font-variant-numeric: tabular-nums; }
-.catalog-price-control > label { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; white-space: nowrap; cursor: pointer; }
+.editable-table { table-layout: fixed; }
+.admin-table.editable-table :is(th, td) { padding: 8px 6px; overflow-wrap: anywhere; }
+.editable-table th:nth-child(1) { width: 32px; }
+.editable-table th:nth-child(2) { width: 60px; }
+.editable-table th:nth-child(3) { width: 11%; }
+.editable-table th:nth-child(5),
+.editable-table th:nth-child(6) { width: 13%; }
+.editable-table th:nth-child(7) { width: 124px; }
+.editable-table th:nth-child(8) { width: 74px; }
+.editable-table th:nth-child(9) { width: 64px; }
+.editable-table th:nth-child(10) { width: 120px; }
+.editable-table input:not([type="checkbox"]) { width: 100%; min-width: 0; padding: 8px; color: white; background: #151515; border: 1px solid #383838; border-radius: 4px; }
+.editable-table .price-input { font-weight: 800; }
+.catalog-price-control { display: flex; flex-direction: column; align-items: stretch; gap: 5px; }
+.catalog-price-control > .price-input { order: -1; text-align: right; font-variant-numeric: tabular-nums; }
+.catalog-price-control > label { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; cursor: pointer; }
 .catalog-price-control > label > input[type="checkbox"] { flex: 0 0 17px; margin: 0; }
-.editable-table .stock-input { width: 76px; min-width: 76px; }
-.editable-table .editable-name { min-width: 240px; white-space: normal; }
-.editable-table .title-input { width: 100%; min-width: 240px; max-width: 360px; }
+.editable-table .table-actions { justify-content: flex-end; }
+
+@media (max-width: 1024px) {
+  .editable-table, .editable-table tbody { display: block; }
+  .editable-table thead tr { display: flex; }
+  .editable-table thead th:not(:first-child) { display: none; }
+  .editable-table tbody tr {
+    display: grid;
+    grid-template-columns: 24px 48px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "select photo sku sku"
+      "name name name name"
+      "brand brand category category"
+      "price price stock stock"
+      "publish publish actions actions";
+    align-items: center;
+    gap: 8px 10px;
+    padding: 12px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .admin-table.editable-table tbody td { min-width: 0; padding: 0; border: 0; }
+  .editable-table td:nth-child(1) { grid-area: select; }
+  .editable-table td:nth-child(2) { grid-area: photo; }
+  .editable-table td:nth-child(3) { grid-area: sku; }
+  .editable-table td:nth-child(4) { grid-area: name; }
+  .editable-table td:nth-child(5) { grid-area: brand; }
+  .editable-table td:nth-child(6) { grid-area: category; }
+  .editable-table td:nth-child(7) { grid-area: price; }
+  .editable-table td:nth-child(8) { grid-area: stock; align-self: start; }
+  .editable-table td:nth-child(9) { grid-area: publish; }
+  .editable-table td:nth-child(10) { grid-area: actions; }
+  .editable-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--muted); }
+  .editable-table td:nth-child(9)[data-label]::before { display: inline; margin: 0 6px 0 0; }
+}
 .quick-pricing { border-color: rgba(241, 90, 36, .35); }
 .quick-pricing .catalog-filters { grid-template-columns: minmax(260px, 520px); }
 .price-paste { display: grid; grid-template-columns: minmax(190px, .8fr) minmax(280px, 1.4fr) auto; align-items: center; gap: 14px; margin: 16px 0; padding: 14px; border: 1px solid #3a321f; border-radius: 6px; background: #19150d; }

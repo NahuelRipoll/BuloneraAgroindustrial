@@ -94,6 +94,28 @@ test('módulos independientes y carga de varios artículos sin formularios indiv
   expect(errors).toEqual([]);
 });
 
+test('el catálogo permite abrir las fotos sin desplazamiento horizontal', async ({ page }) => {
+  await setup(page);
+  await page.goto('/admin/productos/catalogo');
+  const row = page.locator('.editable-table tbody tr').filter({ hasText: '2120289' });
+  const edit = row.getByRole('button', { name: 'Editar', exact: true });
+
+  for (const width of [1440, 1080, 768, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(edit).toBeVisible();
+    await expect.poll(() => row.evaluate((element) => {
+      const wrapper = element.closest('.admin-table-wrap');
+      return wrapper.scrollWidth - wrapper.clientWidth;
+    })).toBe(0);
+    const bounds = await edit.boundingBox();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+  }
+
+  await edit.click();
+  await expect(page.getByRole('dialog').getByText('Subir fotos')).toBeVisible();
+});
+
 test('edición pendiente y ajustes de medidas sobreviven a la navegación entre módulos', async ({ page }) => {
   const { writes, errors } = await setup(page);
   await page.goto('/admin/productos/catalogo');
