@@ -27,6 +27,9 @@ export function PaymentResult() {
     <p role="status">{message}</p>
     {order ? <p>Pedido: <strong>{order}</strong></p> : null}
     <p>Entorno de pruebas. El envío o retiro se coordina por WhatsApp; no se cobra envío en este checkout.</p>
-    <button className="button-outline" onClick={() => setAttempt((value) => value + 1)}>Consultar estado</button>
+    <button className="button-outline" onClick={() => {
+      setMessage("Verificando el pago con Mercado Pago…");
+      setAttempt((value) => value + 1);
+    }}>Consultar estado</button>
   </div>;
 }
